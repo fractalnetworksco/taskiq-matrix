@@ -7,6 +7,9 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
+taskiq = "^0.10.2"
+matrix-nio = "^0.22.1"
+nest-asyncio = "^1.5.8"
 
 
 [build-system]

@@ -7,7 +7,6 @@ import socket
 from typing import Any, AsyncGenerator, List
 from uuid import uuid4
 
-import IPython
 from nio import RoomGetStateEventError, RoomPutStateError
 from taskiq import AckableMessage, AsyncBroker, BrokerMessage
 
@@ -59,11 +58,11 @@ class MatrixBroker(AsyncBroker):
         super().__init__(result_backend=result_backend, task_id_generator=task_id_generator)
 
         try:
-            self.room = os.environ["HS_ROOM_ID"]
+            self.room = os.environ["MATRIX_ROOM_ID"]
         except KeyError as e:
             raise KeyError(f"Missing required environment variable: {e}")
 
-        self.device_name = os.environ.get("HS_DEVICE_NAME", socket.gethostname())
+        self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
         self.worker_id = uuid4().hex
         self.logger = Logger()
 
@@ -270,15 +269,15 @@ class MatrixBroker(AsyncBroker):
 
     async def get_tasks(self) -> AsyncGenerator[List[Task], Any]:
         tasks = {
-            self.device_queue.name: self.device_queue.get_unacked_tasks,
-            self.broadcast_queue.name: self.broadcast_queue.get_unacked_tasks,
-            self.mutex_queue.name: self.mutex_queue.get_unacked_tasks,
+            self.device_queue.name: asyncio.create_task(self.device_queue.get_unacked_tasks()),
+            self.broadcast_queue.name: asyncio.create_task(self.broadcast_queue.get_unacked_tasks()),
+            self.mutex_queue.name: asyncio.create_task(self.mutex_queue.get_unacked_tasks()),
         }
         while True:
             sync_tasks = [
-                tasks[self.device_queue.name](),
-                tasks[self.broadcast_queue.name](),
-                tasks[self.mutex_queue.name](),
+                tasks[self.device_queue.name],
+                tasks[self.broadcast_queue.name],
+                tasks[self.mutex_queue.name],
             ]
 
             done, pending = await asyncio.wait(sync_tasks, return_when=asyncio.FIRST_COMPLETED)

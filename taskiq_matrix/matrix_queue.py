@@ -6,7 +6,6 @@ from functools import partial
 from typing import Dict, List, Optional, Tuple
 
 import nest_asyncio
-from asgiref.sync import async_to_sync
 from nio import AsyncClient, RoomGetStateEventError, RoomPutStateError, SyncResponse
 from taskiq import AckableMessage
 
@@ -86,7 +85,7 @@ class Checkpoint:
         # initialize checkpoint
         loop = asyncio.get_event_loop()
         # https://stackoverflow.com/questions/46827007/runtimeerror-this-event-loop-is-already-running-in-python/56434301#56434301
-        nest_asyncio.apply()
+        #nest_asyncio.apply()
         loop.run_until_complete(self.get_or_init_checkpoint())
 
     async def get_or_init_checkpoint(self) -> Optional[str]:
@@ -176,19 +175,17 @@ class MatrixQueue:
     def __init__(
         self,
         name: str,
-        homeserver_url: str = os.environ["HS_MATRIX_URL"],
-        access_token: str = os.environ["HS_ACCESS_TOKEN"],
-        user_id: str = os.environ["HS_USER_ID"],
-        room_id: str = os.environ["HS_ROOM_ID"],
+        homeserver_url: str = os.environ["MATRIX_HOMESERVER_URL"],
+        access_token: str = os.environ["MATRIX_ACCESS_TOKEN"],
+        room_id: str = os.environ["MATRIX_ROOM_ID"],
     ):
         self.client = AsyncClient(homeserver_url)
         self.client.access_token = access_token
-        self.client.user_id = user_id
 
         self.name = name
         self.checkpoint = Checkpoint(type=name, client=self.client, room_id=room_id)
         self.task_types = TaskTypes(name)
-        self.device_name = os.environ.get("HS_DEVICE_NAME", socket.gethostname())
+        self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
         self.room_id = room_id
 
     async def verify_room_exists(self) -> None:
@@ -316,7 +313,7 @@ class MatrixQueue:
 
                 self.logger.log(
                     f"Yielding message {task.data} for task {task.id} to worker {self.device_name}",
-                    "debug",
+                    "info",
                 )
                 return AckableMessage(
                     data=task_data,

@@ -3,7 +3,6 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any, Coroutine, Dict, List
 
-import yaml
 from aiofiles import open as aopen
 from aiofiles.os import listdir
 from nio.responses import RoomGetStateEventError
@@ -12,7 +11,7 @@ from taskiq.abc.schedule_source import ScheduleSource
 from taskiq.scheduler.scheduler import ScheduledTask
 
 if TYPE_CHECKING:
-    from homeserver.matrix_taskiq_broker import MatrixBroker
+    from taskiq_matrix import MatrixBroker
 
 SCHEDULE_DIR = "/schedules"
 

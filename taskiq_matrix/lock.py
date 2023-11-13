@@ -31,14 +31,12 @@ class MatrixLock:
 
     def __init__(
         self,
-        homeserver_url: str = os.environ["HS_MATRIX_URL"],
-        access_token: str = os.environ["HS_ACCESS_TOKEN"],
-        user_id: str = os.environ["HS_USER_ID"],
-        room_id: str = os.environ["HS_ROOM_ID"],
+        homeserver_url: str = os.environ["MATRIX_HOMESERVER_URL"],
+        access_token: str = os.environ["MATRIX_ACCESS_TOKEN"],
+        room_id: str = os.environ["MATRIX_ROOM_ID"],
     ):
         self.client = AsyncClient(homeserver_url)
         self.client.access_token = access_token
-        self.client.user_id = user_id
         self.room_id = room_id
         self.lock_id = str(uuid4())
         self.next_batch = None
@@ -236,4 +234,7 @@ class MatrixLock:
         return d
 
     def __del__(self):
-        asyncio.run(self.client.close())
+        loop = asyncio.get_running_loop()
+        if not loop:
+            loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.client.close())

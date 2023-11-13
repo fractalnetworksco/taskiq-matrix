@@ -33,15 +33,14 @@ class MatrixResultBackend(AsyncResultBackend):
         :param result_px_time: expire time in milliseconds for result.
         """
         self.matrix_client = AsyncClient(
-            homeserver=os.environ["HS_MATRIX_URL"],
+            homeserver=os.environ["MATRIX_HOMESERVER_URL"],
         )
-        self.matrix_client.access_token = os.environ["HS_ACCESS_TOKEN"]
-        self.matrix_client.user_id = os.environ["HS_USER_ID"]
-        self.room = os.environ["HS_ROOM_ID"]
+        self.matrix_client.access_token = os.environ["MATRIX_ACCESS_TOKEN"]
+        self.room = os.environ["MATRIX_ROOM_ID"]
         self.logger = Logger()
         self.result_ex_time = result_ex_time
         self.result_px_time = result_px_time
-        self.device_name = os.environ.get("HS_DEVICE_NAME", socket.gethostname())
+        self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
 
         unavailable_conditions = any(
             (
