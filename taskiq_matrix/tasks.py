@@ -33,7 +33,7 @@ async def update_checkpoint(queue_name: str) -> bool:
 
     current_since_token = await queue.checkpoint.get_or_init_checkpoint()
 
-    logger.info("Fetching all tasks")
+    logger.info(f"Fetching all tasks for queue: {queue}")
 
     # gets all tasks and acks since the checkpoint (including their event ids)
     # TODO: handle using results. Once we use them, we can use task_types.all()

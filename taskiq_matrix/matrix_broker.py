@@ -268,12 +268,13 @@ class MatrixBroker(AsyncBroker):
         )
 
     async def get_tasks(self) -> AsyncGenerator[List[Task], Any]:
-        tasks = {
-            self.device_queue.name: asyncio.create_task(self.device_queue.get_unacked_tasks()),
-            self.broadcast_queue.name: asyncio.create_task(self.broadcast_queue.get_unacked_tasks()),
-            self.mutex_queue.name: asyncio.create_task(self.mutex_queue.get_unacked_tasks()),
-        }
+
         while True:
+            tasks = {
+                self.device_queue.name: asyncio.create_task(self.device_queue.get_unacked_tasks(), name=self.device_queue.name),
+                self.broadcast_queue.name: asyncio.create_task(self.broadcast_queue.get_unacked_tasks(), name=self.broadcast_queue.name),
+                self.mutex_queue.name: asyncio.create_task(self.mutex_queue.get_unacked_tasks(), name=self.mutex_queue.name),
+            }
             sync_tasks = [
                 tasks[self.device_queue.name],
                 tasks[self.broadcast_queue.name],

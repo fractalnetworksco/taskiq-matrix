@@ -62,3 +62,4 @@ async def send_message(
         logger.debug("Response from room_send: %s", response)
     except Exception as err:
         logger.error("Error sending message: %s", err)
+        raise

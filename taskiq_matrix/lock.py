@@ -237,4 +237,7 @@ class MatrixLock:
         loop = asyncio.get_running_loop()
         if not loop:
             loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.client.close())
+            loop.run_until_complete(self.client.close())
+        else:
+            loop.create_task(self.client.close())
+            # task.add_done_callback(lambda t: print("DOne!"))
