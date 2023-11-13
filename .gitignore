@@ -1,0 +1,8 @@
+**/__pycache__
+**.env*
+!**.env.example
+**venv*
+**/.coverage
+**/coverage.lcov
+**/build
+**/*.egg-info
