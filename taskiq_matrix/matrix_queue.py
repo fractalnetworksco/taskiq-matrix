@@ -5,11 +5,10 @@ import socket
 from functools import partial
 from typing import Dict, List, Optional, Tuple
 
-import nest_asyncio
 from nio import AsyncClient, RoomGetStateEventError, RoomPutStateError, SyncResponse
 from taskiq import AckableMessage
 
-from .exceptions import LockAcquireError, MatrixRoomNotFound, MatrixSyncError
+from .exceptions import LockAcquireError, MatrixSyncError, TaskAlreadyAcked
 from .filters import EMPTY_FILTER, create_filter, run_sync_filter
 from .lock import MatrixLock
 from .log import Logger
@@ -83,11 +82,11 @@ class Checkpoint:
         self.logger = logger
 
         # initialize checkpoint
-        loop = asyncio.new_event_loop()
+        # loop = asyncio.new_event_loop()
         # https://stackoverflow.com/questions/46827007/runtimeerror-this-event-loop-is-already-running-in-python/56434301#56434301
         # nest_asyncio.apply()
         # FIXME: This breaks pytest-asyncio tests (POSSIBLY?)
-        self.task = loop.create_task(self.get_or_init_checkpoint())
+        # self.task = loop.create_task(self.get_or_init_checkpoint())
         # loop.run_until_complete(self.get_or_init_checkpoint())
 
     async def get_or_init_checkpoint(self) -> Optional[str]:
@@ -148,7 +147,7 @@ class Checkpoint:
                     return True
 
         except LockAcquireError as e:
-            self.logger.log(f"Failed to add checkpoint: {e}\n")
+            self.logger.log(f"Failed to add checkpoint: {e}\n", "debug")
             return False
 
     @classmethod
@@ -183,7 +182,6 @@ class MatrixQueue:
     ):
         self.client = AsyncClient(homeserver_url)
         self.client.access_token = access_token
-
         self.name = name
         self.checkpoint = Checkpoint(type=name, client=self.client, room_id=room_id)
         self.task_types = TaskTypes(name)
@@ -239,7 +237,7 @@ class MatrixQueue:
 
         # filter tasks that were not acknowledged and return them
         unacked = [task for task in task_dict.values() if not task.acknowledged]
-        print(f"{self.name} Unacked tasks: {unacked}")
+        self.logger.log(f"{self.name} Unacked tasks: {unacked}", "debug")
         return unacked
 
     async def get_unacked_tasks(self, timeout: int = 30000) -> Tuple[str, List[Task]]:
@@ -261,7 +259,7 @@ class MatrixQueue:
 
     async def all_tasks_acked(self) -> bool:
         """
-        Returns if all tasks have been acked and if so returns True else False.
+        Returns a boolean for all tasks being acked or not.
         """
         unacked_tasks = await self.get_unacked_tasks()
         return len(unacked_tasks) == 0
@@ -285,7 +283,7 @@ class MatrixQueue:
 
     async def ack_msg(self, task_id: str) -> None:
         """
-        Acks a message
+        Acks a given task id.
         """
         message = json.dumps(
             {
@@ -303,26 +301,44 @@ class MatrixQueue:
         )
 
     async def yield_task(self, task: Task) -> AckableMessage:
-        try:
-            async with MatrixLock().lock(f"{self.task_types.lock}.{task.id}"):
-                # ensure that task has not been acked since lock was acquired
-                acked = await self.task_is_acked(task.id)
-                if acked:
-                    raise Exception(f"Task {task.id} has already been acked")
+        """
+        Attempts to lock a task and yield it to a worker. If the lock is
+        acquired and the task has been acked since the lock was acquired, then
+        a TaskAlreadyAcked exception is raised.
 
-                # encode task data
-                task_data = json.dumps(task.data).encode("utf-8")
+        Args:
+            task (Task): The task to yield.
 
-                self.logger.log(
-                    f"Yielding message {task.data} for task {task.id} to worker {self.device_name}",
-                    "info",
-                )
-                return AckableMessage(
-                    data=task_data,
-                    ack=partial(self.ack_msg, task.id),
-                )
-        except LockAcquireError as e:
-            raise Exception(e)
+        Returns:
+            An AckableMessage containing the task data.
+
+        Raises:
+            LockAcquireError: If the lock could not be acquired.
+            TaskAlreadyAcked: If the task has been acked since the lock was acquired.
+        """
+        async with MatrixLock().lock(f"{self.task_types.lock}.{task.id}"):
+            # ensure that task has not been acked since lock was acquired
+            acked = await self.task_is_acked(task.id)
+            if acked:
+                raise TaskAlreadyAcked(task.id)
+
+            # encode task data
+            task_data = json.dumps(task.data).encode("utf-8")
+
+            self.logger.log(
+                f"Yielding message {task.data} for task {task.id} to worker {self.device_name}",
+                "info",
+            )
+            return AckableMessage(
+                data=task_data,
+                ack=partial(self.ack_msg, task.id),
+            )
+
+    async def shutdown(self) -> None:
+        """
+        Closes the Queue's Matrix client session.
+        """
+        await self.client.close()
 
     def __del__(self):
         asyncio.run(self.client.close())

@@ -1,5 +1,10 @@
 from nio import SyncError
-from taskiq.exceptions import ResultBackendError, ResultGetError, TaskiqError
+from taskiq.exceptions import (
+    ResultBackendError,
+    ResultGetError,
+    SendTaskError,
+    TaskiqError,
+)
 
 
 class TaskIQMatrixError(TaskiqError):
@@ -30,9 +35,25 @@ class LockAcquireError(TaskIQMatrixError):
     """Error if lock can't be acquired."""
 
 
+class TaskAlreadyAcked(LockAcquireError):
+    """Error if a task has already been acked since the lock was acquired."""
+
+    def __init__(self, task_id: str):
+        super().__init__(f"Task {task_id} is already acked")
+
+
 class MatrixRoomNotFound(TaskIQMatrixError):
     """Error if Matrix room can't be found."""
 
 
 class QueueDoesNotExist(TaskIQMatrixError):
     """Error if a Matrix queue does not exist."""
+
+
+class ScheduledTaskRequiresTaskIdLabel(TaskIQMatrixError, SendTaskError):
+    """Error if a scheduled task is missing the task_id label."""
+
+    def __init__(self, task_id: str):
+        super().__init__(
+            f"Scheduled task {task_id} is missing the task_id label. Scheduled tasks must have a task_id label."
+        )

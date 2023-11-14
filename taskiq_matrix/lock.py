@@ -163,7 +163,7 @@ class MatrixLock:
         try:
             yield self.lock_id
         finally:
-            print(f"Worker ({self.lock_id}) releasing lock: {key}")
+            self.logger.info(f"Worker ({self.lock_id}) releasing lock: {key}")
             # update sync token before we release
             await self.filter(self.create_filter(limit=0), timeout=0)
             self.next_batch = self.client.next_batch
@@ -196,7 +196,7 @@ class MatrixLock:
             if res[self.room_id] and res[self.room_id][0]["lock_id"] == self.lock_id:
                 return True
             else:
-                print(
+                self.logger.info(
                     f'Someone else got the {key} lock: Worker {res[self.room_id][0]["lock_id"]}'
                 )
                 return False

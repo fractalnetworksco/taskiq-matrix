@@ -148,15 +148,17 @@ class MatrixRoomScheduleSource(ScheduleSource):
         # FIXME: Should each queue have its own schedule state?
         # for now all schedules for all queues are stored in the same state
         resp = await self.broker.mutex_queue.client.room_get_state_event(
-            self.broker.room,
+            self.broker.room_id,
             self.schedule_state_name,
         )
         if isinstance(resp, RoomGetStateEventError):
             if resp.status_code == "M_NOT_FOUND":
-                self.broker.logger.log(f"No schedules found for room {self.broker.room}", "info")
+                self.broker.logger.log(
+                    f"No schedules found for room {self.broker.room_id}", "info"
+                )
             else:
                 self.broker.logger.log(
-                    f"Encountered error when fetching schedules from room {self.broker.room}: {resp}",
+                    f"Encountered error when fetching schedules from room {self.broker.room_id}: {resp}",
                     "error",
                 )
             return []
