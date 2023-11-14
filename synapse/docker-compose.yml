@@ -1,0 +1,25 @@
+version: "3.9"
+services:
+  synapse:
+    image: homeserver-synapse:latest
+    build:
+      context: ./config
+      dockerfile: Dockerfile.synapse
+      args:
+        SYNAPSE_SERVER_NAME: "localhost"
+        SYNAPSE_REPORT_STATS: "no"
+    ports:
+      - 8008:8008
+    healthcheck:
+      test: curl localhost:8008/health
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    labels:
+      - "org.homeserver=true"
+    restart: "unless-stopped"
+  element:
+    image: vectorim/element-web:latest
+    ports:
+      - "8009:80"
+    restart: "unless-stopped"

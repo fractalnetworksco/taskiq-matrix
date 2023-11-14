@@ -1,0 +1,33 @@
+services:
+  synapse:
+    image: homeserver-synapse:latest
+    build:
+      context: ./synapse/config
+      dockerfile: Dockerfile.synapse
+      args:
+        SYNAPSE_SERVER_NAME: "localhost"
+        SYNAPSE_REPORT_STATS: "no"
+    healthcheck:
+      test: curl localhost:8008/health
+      interval: 1s
+      timeout: 10s
+      retries: 10
+    labels:
+      - "org.homeserver=true"
+    # --timeout on up doesn't work with --exit-code-from. This ensures the synapse
+    # container is stopped immediately when the device exits
+    stop_signal: SIGKILL
+  device:
+    image: homeserver-agent:test
+    build:
+      context: ./
+      dockerfile: Dockerfile.test
+    depends_on:
+      synapse:
+        condition: service_healthy
+    environment:
+      ENV: test
+      TEST_CONFIG_DIR: /test-config
+      TEST_HOMESERVER_URL: http://synapse:8008
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

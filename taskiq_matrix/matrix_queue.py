@@ -340,9 +340,6 @@ class MatrixQueue:
         """
         await self.client.close()
 
-    def __del__(self):
-        asyncio.run(self.client.close())
-
 
 class BroadcastQueue(MatrixQueue):
     def __init__(self, *args, **kwargs):
