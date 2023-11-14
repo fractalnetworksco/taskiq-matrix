@@ -357,6 +357,9 @@ class MatrixQueue:
 
 
 class BroadcastQueue(MatrixQueue):
+    # FIXME: instead of locking in the matrix room, lock locally since
+    # there are multiple workers are run on the same machine. This will
+    # speed up the lock acquisition process.
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.task_types.ack = f"{self.task_types.ack}.{self.device_name}"
