@@ -35,4 +35,4 @@ build:
 	docker compose -f docker-compose.test.yml build
 
 dev-install:
-	pip install -e .
+	pip install -e .[dev]
