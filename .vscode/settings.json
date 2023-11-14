@@ -1,0 +1,21 @@
+{
+    "[python]": {
+        "editor.formatOnSaveMode": "file",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": true,
+        },
+        "editor.defaultFormatter": "ms-python.black-formatter",
+    },
+    "black-formatter.args": ["--line-length", "98"],
+    "isort.args": [
+        "--profile",
+        "black"
+    ],
+    "python.analysis.typeCheckingMode": "basic",
+    "coverage-gutters.coverageReportFileName": "**",
+    "coverage-gutters.coverageFileNames": [
+        "coverage.lcov"
+    ]
+}
+

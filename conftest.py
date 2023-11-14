@@ -5,9 +5,11 @@ from typing import Generator
 from uuid import uuid4
 
 import pytest
-from nio import AsyncClient, RoomCreateError
+from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse
 from taskiq.message import BrokerMessage
 from taskiq_matrix.matrix_broker import BroadcastQueue, MatrixBroker, MatrixQueue
+from taskiq_matrix.matrix_queue import Checkpoint
+from unittest.mock import MagicMock
 
 try:
     TEST_HOMESERVER_URL = os.environ["MATRIX_HOMESERVER_URL"]
@@ -72,6 +74,14 @@ def test_broker_message():
 
     # create the BrokerMessage object
     return BrokerMessage(task_id=task_id, task_name="test_name", message=message_bytes, labels={})
+
+@pytest.fixture(scope="function")
+def test_checkpoint():
+    mock_client_parameter = MagicMock(spec=AsyncClient)
+    mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
+        content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id="test room"
+    )
+    return Checkpoint(type="abc", room_id="abc", client=mock_client_parameter)
 
 
 # FIXME: Add a Matrix result backend fixture. The fixture should look very similar
