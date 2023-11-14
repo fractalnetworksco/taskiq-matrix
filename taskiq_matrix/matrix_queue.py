@@ -176,10 +176,23 @@ class MatrixQueue:
     def __init__(
         self,
         name: str,
-        homeserver_url: str = os.environ["MATRIX_HOMESERVER_URL"],
-        access_token: str = os.environ["MATRIX_ACCESS_TOKEN"],
-        room_id: str = os.environ["MATRIX_ROOM_ID"],
+        homeserver_url: str = os.environ.get("MATRIX_HOMESERVER_URL", ""),
+        access_token: str = os.environ.get("MATRIX_ACCESS_TOKEN", ""),
+        room_id: str = os.environ.get("MATRIX_ROOM_ID", ""),
     ):
+        if not homeserver_url:
+            raise Exception(
+                "MatrixQueue requires MATRIX_HOMESERVER_URL environment variable set if not passed explicitly"
+            )
+        if not access_token:
+            raise Exception(
+                "MatrixQueue requires MATRIX_ACCESS_TOKEN environment variable set if not passed explicitly"
+            )
+        if not room_id:
+            raise Exception(
+                "MatrixQueue requires MATRIX_ROOM_ID environment variable set if not passed explicitly"
+            )
+
         self.client = AsyncClient(homeserver_url)
         self.client.access_token = access_token
         self.name = name

@@ -31,10 +31,18 @@ class MatrixLock:
 
     def __init__(
         self,
-        homeserver_url: str = os.environ["MATRIX_HOMESERVER_URL"],
-        access_token: str = os.environ["MATRIX_ACCESS_TOKEN"],
-        room_id: str = os.environ["MATRIX_ROOM_ID"],
+        homeserver_url: str = os.environ.get("MATRIX_HOMESERVER_URL", ""),
+        access_token: str = os.environ.get("MATRIX_ACCESS_TOKEN", ""),
+        room_id: str = os.environ.get("MATRIX_ROOM_ID", ""),
     ):
+        # raise an exception if any of the required env vars are missing
+        if not homeserver_url:
+            raise Exception("MATRIX_HOMESERVER_URL is required if not passed explicitly")
+        if not access_token:
+            raise Exception("MATRIX_ACCESS_TOKEN is required if not passed explicitly")
+        if not room_id:
+            raise Exception("MATRIX_ROOM_ID is required if not passed explicitly")
+
         self.client = AsyncClient(homeserver_url)
         self.client.access_token = access_token
         self.room_id = room_id

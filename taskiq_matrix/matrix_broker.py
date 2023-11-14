@@ -46,10 +46,9 @@ class MatrixBroker(AsyncBroker):
         device in a group
 
         Requires the following environment variables to be set:
-        - HS_MATRIX_URL
-        - HS_ACCESS_TOKEN
-        - HS_USER_ID
-        - HS_ROOM_ID
+        - MATRIX_HOMESERVER_URL
+        - MATRIX_ACCESS_TOKEN
+        - MATRIX_ROOM_ID
 
         NOTE: Rate limiting for the configured user should be disabled:
         `insert into ratelimit_override values ("@mjolnir:my-homeserver.chat", 0, 0);`
@@ -58,6 +57,8 @@ class MatrixBroker(AsyncBroker):
         super().__init__(result_backend=result_backend, task_id_generator=task_id_generator)
 
         try:
+            os.environ["MATRIX_HOMESERVER_URL"]
+            os.environ["MATRIX_ACCESS_TOKEN"]
             self.room_id = os.environ["MATRIX_ROOM_ID"]
         except KeyError as e:
             raise KeyError(f"Missing required environment variable: {e}")
