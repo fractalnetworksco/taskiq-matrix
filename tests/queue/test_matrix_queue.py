@@ -1,17 +1,16 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 from nio import RoomGetStateEventError, RoomGetStateEventResponse
-from homeserver.matrix_taskiq_broker.matrix_queue import (
-    AckableMessage,
+from taskiq_matrix.matrix_queue import (
     LockAcquireError,
     MatrixQueue,
     Task,
-    TaskTypes
 )
+
+from taskiq_matrix.utils import send_message
 from functools import partial
 
 import json
 import pytest
-import asyncio
 
 async def test_matrix_queue_verify_room_exists_error():
     """
@@ -87,11 +86,11 @@ async def test_matrix_queue_get_tasks_return_tasks():
 
     # patch the create_filter and run_sync_filter functions and call get_tasks() 
     with patch(
-        "homeserver.matrix_taskiq_broker.matrix_queue.create_filter"
+        "taskiq_matrix.matrix_queue.create_filter"
     ) as mock_create_filter:
         mock_create_filter.return_value = {}
         with patch(
-            "homeserver.matrix_taskiq_broker.matrix_queue.run_sync_filter", new=AsyncMock()
+            "taskiq_matrix.matrix_queue.run_sync_filter", new=AsyncMock()
         ) as mock_sync_filter:
             mock_sync_filter.return_value = {matrix_queue.room_id: test_task_list}
             result = await matrix_queue.get_tasks()
@@ -148,51 +147,343 @@ async def test_matrix_queue_filter_acked_tasks_proper_filter():
     assert len(unacked_tasks) == 1
     assert unacked_tasks[0] == test_task_objects[0]
 
-async def test_matrix_queue_get_unacked_tasks():
+async def test_matrix_queue_get_unacked_tasks_mixed_tasks(test_matrix_broker):
     """
-    NOT DONE
+    Tests that the dictionary returned by get_unacked_tasks() contains only the
+    tasks that are not acknowledged by the queue.
     """
 
-    matrix_queue = MatrixQueue(name="test_matrix_queue")
+    # matrix_queue = MatrixQueue(name="test_matrix_queue")
+    test_broker = await test_matrix_broker()
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
 
     event1 = {
-        "body": {
-            "task_id": "josdfj09b48907w3",
-            "task": "{}",
-            "queue": "test_matrix_queue",
-        },
-        "msgtype": "taskiq.test_matrix_queue.task"
+        "task_id": "josdfj09b48907w3",
+        "queue" : "mutex_queue",
+        "msgtype": matrix_queue.task_types.task
     }
 
     event2 = {
-        "body": {
-            "task_id": "josdfj09b48907w3",
-            "task": "{}",
-            "queue": "test_matrix_queue",
-        },
-        "msgtype": "taskiq.test_matrix_queue.task.ack.josdfj09b48907w3"
+        "task_id": "josdfj09b48907w3",
+        "queue" : "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3"
     }
 
     event3 = {
-        "body": {
-            "task_id": "kdjfosdf-4j239034",
-            "task": "{}",
-            "queue": "test_matrix_queue",
-        },
-        "msgtype": "taskiq.test_matrix_queue.task"
+        "task_id": "kdjfosdf-4j239034",
+        "queue" : "mutex_queue",
+        "msgtype": matrix_queue.task_types.task
     }
 
-    test_tasks = [
-        Task(**event1),
-        Task(**event2),
-        Task(**event3)
-    ]
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event1),
+        queue="mutex_queue",
+        msgtype=event1["msgtype"],
+        task_id=event1["task_id"]
+    )
+    
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event2),
+        queue="mutex_queue",
+        msgtype=event2["msgtype"],
+        task_id=event2["task_id"]
+    )
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event3),
+        queue="mutex_queue",
+        msgtype=event3["msgtype"],
+        task_id=event3["task_id"]
+    )
     
     result = await matrix_queue.get_unacked_tasks()
-    print(type(result[1]))
     assert isinstance(result[1], list)
     assert len(result[1]) == 1
-    assert result[1][0] == test_tasks[2]
+    assert result[1][0].type == event3["msgtype"]
+    assert result[1][0].id == event3["task_id"]
+
+    await test_broker.shutdown()
+
+async def test_matrix_queue_get_unacked_tasks_only_acked_tasks(test_matrix_broker):
+    """
+    Tests that get_unacked_tasks() returns a list of size 0 if there are no unacknowledged
+    in the queue
+    """
+
+    # matrix_queue = MatrixQueue(name="test_matrix_queue")
+    test_broker = await test_matrix_broker()
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
+
+    event1 = {
+        "task_id": "josdfj09b48907w3",
+        "queue" : "mutex_queue",
+        "msgtype": matrix_queue.task_types.task
+    }
+
+    event2 = {
+        "task_id": "josdfj09b48907w3",
+        "queue" : "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3"
+    }
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event1),
+        queue="mutex_queue",
+        msgtype=event1["msgtype"],
+        task_id=event1["task_id"]
+    )
+    
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event2),
+        queue="mutex_queue",
+        msgtype=event2["msgtype"],
+        task_id=event2["task_id"]
+    )
+    
+    result = await matrix_queue.get_unacked_tasks()
+    assert isinstance(result[1], list)
+    assert len(result[1]) == 0
+
+    await test_broker.shutdown()
+
+async def test_matrix_queue_get_unacked_tasks_only_unacked_tasks(test_matrix_broker):
+    """
+    Tests that a list of multiple unacked tasks are returned if there are
+    are more than one unacked tasks in the queue.
+    """
+
+    # matrix_queue = MatrixQueue(name="test_matrix_queue")
+    test_broker = await test_matrix_broker()
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
+
+    event1 = {
+        "task_id": "kdjfosdf-4j239034",
+        "queue" : "mutex_queue",
+        "msgtype": matrix_queue.task_types.task
+    }
+
+    event2 = {
+        "task_id": "kdjfosdf-4j2334735r",
+        "queue" : "mutex_queue",
+        "msgtype": matrix_queue.task_types.task
+    }
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event1),
+        queue="mutex_queue",
+        msgtype=event1["msgtype"],
+        task_id=event1["task_id"]
+    )
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event2),
+        queue="mutex_queue",
+        msgtype=event2["msgtype"],
+        task_id=event2["task_id"]
+    )
+    
+    result = await matrix_queue.get_unacked_tasks()
+    assert isinstance(result[1], list)
+    assert len(result[1]) == 2
+
+    await test_broker.shutdown()
+
+async def test_matrix_queue_all_tasks_acked_unacked_tasks_only(test_matrix_broker):
+    """
+    Tests that att_tasks_acked() returns false if there are only
+    unacked tasks in the queue.
+    """
+
+    # matrix_queue = MatrixQueue(name="test_matrix_queue")
+    test_broker = await test_matrix_broker()
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
+
+    event1 = {
+        "task_id": "kdjfosdf-4j239034",
+        "queue" : "mutex_queue",
+        "msgtype": matrix_queue.task_types.task
+    }
+
+    event2 = {
+        "task_id": "kdjfosdf-4j2334735r",
+        "queue" : "mutex_queue",
+        "msgtype": matrix_queue.task_types.task
+    }
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event1),
+        queue="mutex_queue",
+        msgtype=event1["msgtype"],
+        task_id=event1["task_id"]
+    )
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event2),
+        queue="mutex_queue",
+        msgtype=event2["msgtype"],
+        task_id=event2["task_id"]
+    )
+
+    assert await matrix_queue.all_tasks_acked() == False
+
+async def test_matrix_queue_all_tasks_acked_acked_tasks_only(test_matrix_broker):
+    """
+    Tests that all_tasks_acked() returns True if there are only acked tasks in
+    the queue.
+    """
+    
+    # matrix_queue = MatrixQueue(name="test_matrix_queue")
+    test_broker = await test_matrix_broker()
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
+
+    event1 = {
+        "task_id": "josdfj09b48907w3",
+        "queue" : "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3"
+    }
+
+    event2 = {
+        "task_id": "josdfj09b48907w3",
+        "queue" : "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3"
+    }
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event1),
+        queue="mutex_queue",
+        msgtype=event1["msgtype"],
+        task_id=event1["task_id"]
+    )
+    
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event2),
+        queue="mutex_queue",
+        msgtype=event2["msgtype"],
+        task_id=event2["task_id"]
+    )
+
+    assert await matrix_queue.all_tasks_acked()
+ 
+async def test_matrix_queue_all_tasks_acked_mixed_tasks(test_matrix_broker):
+    """
+    Tests that all_tasks_acked() returns False if there are both acked and unacked
+    tasks in the queue.
+    """
+
+    # matrix_queue = MatrixQueue(name="test_matrix_queue")
+    test_broker = await test_matrix_broker()
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
+
+    event1 = {
+        "task_id": "josdfj09b48907w3",
+        "queue" : "mutex_queue",
+        "msgtype": matrix_queue.task_types.task
+    }
+
+    event2 = {
+        "task_id": "josdfj09b48907w3",
+        "queue" : "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3"
+    }
+
+    event3 = {
+        "task_id": "kdjfosdf-4j239034",
+        "queue" : "mutex_queue",
+        "msgtype": matrix_queue.task_types.task
+    }
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event1),
+        queue="mutex_queue",
+        msgtype=event1["msgtype"],
+        task_id=event1["task_id"]
+    )
+    
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event2),
+        queue="mutex_queue",
+        msgtype=event2["msgtype"],
+        task_id=event2["task_id"]
+    )
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event3),
+        queue="mutex_queue",
+        msgtype=event3["msgtype"],
+        task_id=event3["task_id"]
+    )
+
+    assert await matrix_queue.all_tasks_acked() == False
+
+async def test_matrix_queue_task_is_acked_task(test_matrix_broker):
+    """
+    Tests that task_is_acked returns True of it is given an acknowledged task
+    """
+    # matrix_queue = MatrixQueue(name="test_matrix_queue")
+    test_broker = await test_matrix_broker()
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
+
+    event2 = {
+        "task_id": "josdfj09b48907w3",
+        "queue" : "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3"
+    }
+
+    assert not await matrix_queue.task_is_acked(event2["task_id"])
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event2),
+        queue="mutex_queue",
+        msgtype=event2["msgtype"],
+        task_id=event2["task_id"]
+    )
+
+    assert await matrix_queue.task_is_acked(event2["task_id"])
+
 
 async def test_matrix_queue_ack_msg_uses_given_id():
     """
@@ -213,7 +504,7 @@ async def test_matrix_queue_ack_msg_uses_given_id():
 
     # patch the send_message function with an AsyncMock
     with patch(
-        "homeserver.matrix_taskiq_broker.matrix_queue.send_message", new=AsyncMock()
+        "taskiq_matrix.matrix_queue.send_message", new=AsyncMock()
     ) as mock_message:
         # call ack_msg, passing the task_id that was created locally
         await matrix_queue.ack_msg(test_task_id)
@@ -256,7 +547,7 @@ async def test_matrix_queue_yield_task_lock_fail():
 
     # patch the MatrixLock.lock() function to fail and raise an exception
     with patch(
-        "homeserver.matrix_taskiq_broker.matrix_queue.MatrixLock", autospec=True
+        "taskiq_matrix.matrix_queue.MatrixLock", autospec=True
     ) as mock_lock:
         lock_instance = mock_lock.return_value
         lock_instance.lock.side_effect = LockAcquireError("Test Error")
