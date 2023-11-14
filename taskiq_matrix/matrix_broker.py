@@ -4,22 +4,25 @@ import json
 import logging
 import os
 import socket
-from typing import Any, AsyncGenerator, List
+from typing import Any, AsyncGenerator, List, Optional, Self, TypeVar
 from uuid import uuid4
 
 from nio import RoomGetStateEventError, RoomPutStateError
-from taskiq import AckableMessage, AsyncBroker, BrokerMessage
+from taskiq import AckableMessage, AsyncBroker, AsyncResultBackend, BrokerMessage
 
 from .exceptions import LockAcquireError, ScheduledTaskRequiresTaskIdLabel
+from .filters import EMPTY_FILTER, run_sync_filter
 from .lock import MatrixLock
 from .log import Logger
 from .matrix_queue import BroadcastQueue, MatrixQueue, Task
+from .matrix_result_backend import MatrixResultBackend
 from .utils import send_message
 
 logging.getLogger("nio").setLevel(logging.WARNING)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
 SCHEDULE_STATE_TYPE = "taskiq.schedules"
 
 
@@ -27,10 +30,11 @@ class MatrixBroker(AsyncBroker):
     device_queue: MatrixQueue
     broadcast_queue: BroadcastQueue
     mutex_queue: MatrixQueue
+    result_backend: MatrixResultBackend
 
     def __init__(
         self,
-        result_backend: Any = None,
+        result_backend: Optional["MatrixResultBackend"] = None,
         task_id_generator: Any = None,
     ) -> None:
         """
@@ -55,7 +59,6 @@ class MatrixBroker(AsyncBroker):
         https://github.com/matrix-org/synapse/issues/6286#issuecomment-646944920
         """
         super().__init__(result_backend=result_backend, task_id_generator=task_id_generator)
-
         try:
             os.environ["MATRIX_HOMESERVER_URL"]
             os.environ["MATRIX_ACCESS_TOKEN"]
@@ -69,6 +72,12 @@ class MatrixBroker(AsyncBroker):
         self.broadcast_queue = BroadcastQueue("broadcast", room_id=self.room_id)
         self.worker_id = uuid4().hex
         self.logger = Logger()
+
+    def with_result_backend(self, result_backend: "AsyncResultBackend[_T]") -> Self:
+        if not isinstance(result_backend, MatrixResultBackend):
+            raise Exception("result_backend must be an instance of MatrixResultBackend")
+
+        return super().with_result_backend(result_backend)
 
     async def add_mutex_checkpoint_task(self) -> bool:
         """
@@ -227,6 +236,10 @@ class MatrixBroker(AsyncBroker):
         """
         Kicks a task into the broker.
         """
+        # populate next batch on the result backend client to avoid result delay
+        if not self.result_backend.matrix_client.next_batch:
+            await run_sync_filter(self.result_backend.matrix_client, EMPTY_FILTER, timeout=0)
+
         queue_name = message.labels.get("queue", "mutex")
         queue: MatrixQueue = getattr(self, f"{queue_name}_queue")
 
@@ -244,7 +257,7 @@ class MatrixBroker(AsyncBroker):
                     # generate a new unique task id for the message
                     task_id = self.id_generator()
                     message = self._use_task_id(task_id, message)
-                    message_body = json.loads(message.message.decode("utf-8"))
+                    message_body = message.message
                     await send_message(
                         queue.client,
                         queue.room_id,
@@ -261,7 +274,7 @@ class MatrixBroker(AsyncBroker):
         if message.labels.get("task_id"):
             # task id was provided in labels, so use it
             message = self._use_task_id(message.labels["task_id"], message)
-            message_body = json.loads(message.message.decode("utf-8"))
+            message_body = message.message.decode("utf-8")
 
         # regular task was kicked, simply send message into room
         return await send_message(

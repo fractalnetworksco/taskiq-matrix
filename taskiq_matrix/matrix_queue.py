@@ -40,6 +40,8 @@ class Task:
     queue: str
 
     def __init__(self, *args, **event):
+        # FIXME: if event is malformed this will fail resulting in
+        # a task that can never be acked which breaks the queue
         self.id = event["body"]["task_id"]
         self.type = event["msgtype"]
         self.data = json.loads(event["body"]["task"])
@@ -250,7 +252,7 @@ class MatrixQueue:
 
         # filter tasks that were not acknowledged and return them
         unacked = [task for task in task_dict.values() if not task.acknowledged]
-        self.logger.log(f"{self.name} Unacked tasks: {unacked}", "debug")
+        self.logger.log(f"{self.name} Unacked tasks: {unacked}", "info")
         return unacked
 
     async def get_unacked_tasks(self, timeout: int = 30000) -> Tuple[str, List[Task]]:
@@ -281,7 +283,7 @@ class MatrixQueue:
         """
         Returns a boolean for a task being acked or not.
         """
-        next_batch = since or await self.checkpoint.get_or_init_checkpoint()
+        next_batch = since or self.checkpoint.since_token
 
         # FIXME: Maybe this should be a method on a task type?
         queue_ack_type = self.task_types.ack

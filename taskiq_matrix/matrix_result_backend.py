@@ -41,6 +41,7 @@ class MatrixResultBackend(AsyncResultBackend):
         self.result_ex_time = result_ex_time
         self.result_px_time = result_px_time
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
+        self.next_batch: Optional[str] = None
 
         unavailable_conditions = any(
             (
@@ -106,11 +107,14 @@ class MatrixResultBackend(AsyncResultBackend):
         :returns: True if the result is ready else False.
         """
         sync_filter = create_filter(self.room, types=[f"taskiq.result.{task_id}"])
-        result = await run_sync_filter(self.matrix_client, sync_filter, timeout=0)
-        if result.get(self.room):
-            return True
-        else:
-            return False
+        # cache the next batch token from kick so we can use it later when getting the result
+        # need to do this because when we sync below here, the client's next_batch token will
+        # be updated to the latest sync token, which will be after the result we're looking for
+        self.next_batch = self.matrix_client.next_batch
+        result = await run_sync_filter(
+            self.matrix_client, sync_filter, timeout=30000, since=self.matrix_client.next_batch
+        )
+        return True if result.get(self.room) else False
 
     async def get_result(
         self,
@@ -129,7 +133,9 @@ class MatrixResultBackend(AsyncResultBackend):
         """
 
         sync_filter = create_filter(self.room, types=[f"taskiq.result.{task_id}"])
-        result_object = await run_sync_filter(self.matrix_client, sync_filter, timeout=0)
+        result_object = await run_sync_filter(
+            self.matrix_client, sync_filter, timeout=0, since=self.next_batch
+        )
         # TODO: handle waiting for a number of results for a task
 
         try:

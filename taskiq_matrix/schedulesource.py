@@ -10,8 +10,7 @@ from taskiq import ScheduledTask
 from taskiq.abc.schedule_source import ScheduleSource
 from taskiq.scheduler.scheduler import ScheduledTask
 
-if TYPE_CHECKING:
-    from taskiq_matrix import MatrixBroker
+from .matrix_broker import MatrixBroker
 
 SCHEDULE_DIR = "/schedules"
 
@@ -40,7 +39,7 @@ class FileScheduleSource(ScheduleSource):
         """
         schedules = []
         schedule_files = await self.load_schedule_files()
-        broker_tasks = self.broker.available_tasks
+        broker_tasks = self.broker.get_all_tasks()
         for task in schedule_files:
             if task["name"] not in broker_tasks.keys():
                 raise Exception("Got schedule for non-existant task: {}".format(task["name"]))
@@ -58,7 +57,6 @@ class FileScheduleSource(ScheduleSource):
                     kwargs=task.get("kwargs", {}),
                     cron=task.get("cron"),
                     time=task.get("time"),
-                    source=self,
                 ),
             )
         return schedules
@@ -84,7 +82,10 @@ class FileScheduleSource(ScheduleSource):
 class MatrixRoomScheduleSource(ScheduleSource):
     """Schedule source based on the `taskiq.schedules` state key in a Matrix Room."""
 
-    def __init__(self, broker: "MatrixBroker") -> None:
+    def __init__(self, broker: Any) -> None:
+        if not isinstance(broker, MatrixBroker):
+            raise TypeError(f"MatrixRoomScheduleSource expected MatrixBroker, got {type(broker)}")
+
         self.schedule_state_name = "taskiq.schedules"
         self.broker = broker
 
@@ -111,7 +112,7 @@ class MatrixRoomScheduleSource(ScheduleSource):
 
         schedules = []
         schedule_state = await self.get_schedules_from_room()
-        broker_tasks = self.broker.available_tasks
+        broker_tasks = self.broker.get_all_tasks()
         for task in schedule_state:
             if task["name"] not in broker_tasks.keys():
                 self.broker.logger.log(
@@ -136,9 +137,6 @@ class MatrixRoomScheduleSource(ScheduleSource):
                     kwargs=task.get("kwargs", {}),
                     cron=task.get("cron"),
                     time=task.get("time"),
-                    # point on self source for calling pre_send / post_send when
-                    # task is ready to be enqueued.
-                    source=self,
                 ),
             )
         self.broker.logger.log(f"Returning schedules: {schedules}", "debug")

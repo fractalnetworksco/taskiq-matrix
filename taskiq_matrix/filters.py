@@ -90,7 +90,7 @@ async def run_sync_filter(
     attempts to deserialize json
     """
     if since is None:
-        client.next_batch = None  # type: ignore
+        client.next_batch = None
 
     res = await client.sync(timeout=timeout, sync_filter=filter, since=since)
     if isinstance(res, SyncError):
