@@ -11,7 +11,7 @@ PREPARE_SCRIPT="$TEST_CONFIG_DIR/prepare-test.py"
 python3 "$PREPARE_SCRIPT"
 
 # environment file should be created by prepare-test.py
-source "$TEST_CONFIG_DIR/homeserver.$ENV.env"
+source "$TEST_CONFIG_DIR/taskiq-matrix.$ENV.env"
 
 cd /code
 
