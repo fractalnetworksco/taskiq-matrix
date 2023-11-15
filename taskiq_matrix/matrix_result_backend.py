@@ -78,7 +78,7 @@ class MatrixResultBackend(AsyncResultBackend):
         :param result: TaskiqResult instance.
         """
         # ensure that the device name is set in labels for the result
-        result.labels.update({"device_name": self.device_name})
+        result.labels.update({"device": self.device_name})
 
         message: Dict[str, Union[str, bytes, int]] = {
             "name": task_id,
