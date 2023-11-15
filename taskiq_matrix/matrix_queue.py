@@ -32,6 +32,12 @@ class TaskTypes:
         """
         return [f"{self.task}", f"{self.ack}", f"{self.result}"]
 
+    def device_task(self, device_name: str) -> str:
+        """
+        Returns the task type for the given device name.
+        """
+        return f"taskiq.device.{device_name}.task"
+
 
 class Task:
     acknowledged: bool
@@ -370,6 +376,7 @@ class ReplicatedQueue(BroadcastQueue):
     """
     Replicated queues are broadcast queues whose checkpoints are device specific.
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.checkpoint.type = f"{self.checkpoint.type}.{self.device_name}"
