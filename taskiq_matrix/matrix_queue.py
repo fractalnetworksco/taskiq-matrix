@@ -277,7 +277,7 @@ class MatrixQueue:
         Returns a boolean for all tasks being acked or not.
         """
         unacked_tasks = await self.get_unacked_tasks()
-        return len(unacked_tasks) == 0
+        return len(unacked_tasks[1]) == 0
 
     async def task_is_acked(self, task_id: str, since: Optional[str] = None) -> bool:
         """
