@@ -149,7 +149,7 @@ class Checkpoint:
                     return True
 
         except LockAcquireError as e:
-            self.logger.log(f"Failed to add checkpoint: {e}\n", "debug")
+            self.logger.log(f"Failed to set checkpoint: {e}\n", "debug")
             return False
 
     @classmethod
@@ -364,3 +364,12 @@ class BroadcastQueue(MatrixQueue):
         super().__init__(*args, **kwargs)
         self.task_types.ack = f"{self.task_types.ack}.{self.device_name}"
         self.task_types.lock = f"{self.task_types.lock}.{self.device_name}"
+
+
+class ReplicatedQueue(BroadcastQueue):
+    """
+    Replicated queues are broadcast queues whose checkpoints are device specific.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.checkpoint.type = f"{self.checkpoint.type}.{self.device_name}"

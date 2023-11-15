@@ -14,7 +14,7 @@ from .exceptions import LockAcquireError, ScheduledTaskRequiresTaskIdLabel
 from .filters import EMPTY_FILTER, run_sync_filter
 from .lock import MatrixLock
 from .log import Logger
-from .matrix_queue import BroadcastQueue, MatrixQueue, Task
+from .matrix_queue import BroadcastQueue, MatrixQueue, ReplicatedQueue, Task
 from .matrix_result_backend import MatrixResultBackend
 from .utils import send_message
 
@@ -70,6 +70,7 @@ class MatrixBroker(AsyncBroker):
         self.mutex_queue = MatrixQueue("mutex", room_id=self.room_id)
         self.device_queue = MatrixQueue(f"device.{self.device_name}", room_id=self.room_id)
         self.broadcast_queue = BroadcastQueue("broadcast", room_id=self.room_id)
+        self.replicated_queue = ReplicatedQueue("replication", room_id=self.room_id)
         self.worker_id = uuid4().hex
         self.logger = Logger()
 
