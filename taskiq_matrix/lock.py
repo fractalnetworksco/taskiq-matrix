@@ -64,42 +64,6 @@ class MatrixLock:
 
         return create_filter(room_id, types=types, limit=limit)
 
-    async def set(self, key: str, value: Union[bytes, str], state_key: str = "") -> None:
-        """
-        TODO: should be moved to a Homeserver Client
-        set a key/value pair in the client's room state
-        """
-        if isinstance(value, bytes):
-            value = b64encode(value).decode("utf-8")
-            msgcontent = {key: value, "bytes": True}
-        else:
-            msgcontent = {key: value}
-        resp = await self.client.room_put_state(self.room_id, key, msgcontent, state_key)
-        if isinstance(resp, RoomPutStateResponse):
-            return None
-        raise Exception(resp.message)
-
-    async def get(
-        self, key: str, default: Any = None, state_key: str = ""
-    ) -> Union[dict, bytes, str]:
-        """
-        TODO: should be moved to a Homeserver Client
-
-        get a key/value pair from the client's room state
-        """
-        resp = await self.client.room_get_state_event(self.room_id, key, state_key)
-        if isinstance(resp, RoomGetStateEventError):
-            # if not default:
-            #     raise KeyError(f"key {key} not found in room state")
-            return default
-
-        # if the value is a base64 encoded string, decode and return bytes
-        val_is_bytes = resp.content.get("bytes", False)
-        if val_is_bytes is True:
-            return b64decode(resp.content[key])
-        else:
-            return resp.content[key]
-
     async def send_message(
         self,
         message: Union[bytes, str, Dict[Any, Any]],
@@ -240,12 +204,3 @@ class MatrixLock:
             for key in filter_keys:
                 d = {k: [i for i in v if i.get(key) == kwargs[key]] for k, v in d.items()}
         return d
-
-    def __del__(self):
-        loop = asyncio.get_running_loop()
-        if not loop:
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(self.client.close())
-        else:
-            loop.create_task(self.client.close())
-            # task.add_done_callback(lambda t: print("DOne!"))
