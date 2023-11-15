@@ -6,3 +6,4 @@
 **/coverage.lcov
 **/build
 **/*.egg-info
+.synapse

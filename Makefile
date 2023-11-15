@@ -2,7 +2,7 @@ SHELL=/bin/bash
 
 TEST=""
 
-.PHONY: synapse setup
+.PHONY: test qtest test-ci build dev-install py-lint py-lint-install synapse
 
 py-lint-install:
 	pip install black isort
@@ -14,6 +14,10 @@ py-lint:
 .synapse:
 	docker compose -f ./synapse/docker-compose.yml up synapse -d --force-recreate --build --wait
 	touch .synapse
+
+synapse:
+	rm -f .synapse > /dev/null
+	$(MAKE) .synapse
 
 element:
 	docker compose -f ./synapse/docker-compose.yml up element -d --force-recreate
