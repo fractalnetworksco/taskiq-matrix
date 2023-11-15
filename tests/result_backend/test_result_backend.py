@@ -3,13 +3,20 @@ from uuid import uuid4
 
 import pytest
 from taskiq.result import TaskiqResult
-from taskiq_matrix.matrix_result_backend import MatrixResultBackend
+from taskiq_matrix.exceptions import DuplicateExpireTimeSelectedError
+from taskiq_matrix.matrix_result_backend import (
+    ExpireTimeMustBeMoreThanZeroError,
+    MatrixResultBackend,
+)
 
 # TODO: move result_backend instantiation into a fixture so that it can be reused
 #       See `conftest.py` for an example. The implementation of the fixture should
 #       be the same as the matrix_client fixture that is in that file.
 
 
+@pytest.mark.skip(
+    reason="The test below this is doing the same thing. So if that one works, then the result backend works"
+)
 async def test_result_backend_works():
     """
     Ensure that only one instance of a lock can be acquired for a certain key.
@@ -49,10 +56,15 @@ async def test_is_result_ready():
     # check if the result is ready before giving a task
     assert await result_backend.is_result_ready(task_id=task_id) == False
 
+    since_token_before = result_backend.matrix_client.next_batch
+
     # sets a task and returns True
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
     await result_backend.set_result(task_id=task_id, result=result)
+    result_backend.matrix_client.next_batch = since_token_before
     assert await result_backend.is_result_ready(task_id=task_id)
+
+    await result_backend.shutdown()
 
 
 async def test_get_result_no_result():
@@ -84,16 +96,21 @@ async def test_get_result_decode_error():
     # set a result for the backend object
     await result_backend.set_result(task_id=task_id, result=result)
 
+    since_token_before = result_backend.matrix_client.next_batch
     # assign the task to the MatrixResultBackend object without logs to raise an exception
     with patch("taskiq_matrix.matrix_result_backend.b64decode", side_effect=Exception):
         with pytest.raises(Exception):
             await result_backend.get_result(task_id=task_id, with_logs=False)
 
+    result_backend.matrix_client.next_batch = since_token_before
     with patch("pickle.loads", side_effect=Exception):
         with pytest.raises(Exception):
             await result_backend.get_result(task_id=task_id, with_logs=False)
 
 
+@pytest.mark.skip(
+    reason="Not finished. Verify that the ex time and px time are included in the message respectively"
+)
 async def test_set_result_ex_px():
     """
     Test manually setting px_time and ex_time
@@ -106,9 +123,13 @@ async def test_set_result_ex_px():
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
     await result_backend.set_result(task_id=task_id, result=result)
 
+    # get the result out of matrix and verify that ex is in the message body
+
     # set a px time of 1
     result_backend = MatrixResultBackend(result_px_time=1)
     await result_backend.set_result(task_id=task_id, result=result)
+
+    # get the result out of matrix and verify that px is in the message body
 
 
 async def test_constructor_duplicate_time():
@@ -120,7 +141,7 @@ async def test_constructor_duplicate_time():
     task_id = str(uuid4())
 
     # set two different px and ex times to raise an exception
-    with pytest.raises(Exception):
+    with pytest.raises(DuplicateExpireTimeSelectedError):
         result_backend = MatrixResultBackend(result_ex_time=10, result_px_time=100)
 
 
@@ -133,5 +154,5 @@ async def test_constructor_ex_px_gt_zero():
     task_id = str(uuid4())
 
     # set ex_time to a negative number to raise an exception
-    with pytest.raises(Exception):
+    with pytest.raises(ExpireTimeMustBeMoreThanZeroError):
         result_backend = MatrixResultBackend(result_ex_time=-10, result_px_time=100)
