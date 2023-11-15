@@ -2,7 +2,7 @@ SHELL=/bin/bash
 
 TEST=""
 
-.PHONY: synapse
+.PHONY: synapse setup
 
 py-lint-install:
 	pip install black isort
@@ -11,19 +11,21 @@ py-lint:
 	black device/
 	isort --profile=black device/
 
-synapse:
-	docker compose -f ./synapse/docker-compose.yml up synapse -d --force-recreate --build
+.synapse:
+	docker compose -f ./synapse/docker-compose.yml up synapse -d --force-recreate --build --wait
+	touch .synapse
 
 element:
 	docker compose -f ./synapse/docker-compose.yml up element -d --force-recreate
 
-setup:
+taskiq-matrix.dev.env: .synapse
+	@echo "Creating synapse environment file"
 	python test-config/prepare-test.py
 
-test:
+test: taskiq-matrix.dev.env
 	. taskiq-matrix.dev.env && pytest -k ${TEST} -s --cov-config=.coveragerc --cov=taskiq_matrix -v --asyncio-mode=auto --cov-report=lcov --cov-report=term tests/
 
-qtest:
+qtest: taskiq-matrix.dev.env
 	. taskiq-matrix.dev.env && pytest -k ${TEST} -s --cov-config=.coveragerc --cov=taskiq_matrix --asyncio-mode=auto --cov-report=lcov tests/
 
 test-ci:
