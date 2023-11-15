@@ -237,7 +237,10 @@ class MatrixBroker(AsyncBroker):
         Kicks a task into the broker.
         """
         # populate next batch on the result backend client to avoid result delay
-        if not self.result_backend.matrix_client.next_batch:
+        if (
+            isinstance(self.result_backend, MatrixResultBackend)
+            and not self.result_backend.matrix_client.next_batch
+        ):
             await run_sync_filter(self.result_backend.matrix_client, EMPTY_FILTER, timeout=0)
 
         queue_name = message.labels.get("queue", "mutex")
