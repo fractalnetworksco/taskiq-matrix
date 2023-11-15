@@ -15,4 +15,4 @@ source "$TEST_CONFIG_DIR/taskiq-matrix.$ENV.env"
 
 cd /code
 
-pytest -v --asyncio-mode=auto --cov=/code/homeserver --cov-report=lcov --cov-report=term
+pytest -v --asyncio-mode=auto --cov=/code/taskiq_matrix --cov-report=lcov --cov-report=term
