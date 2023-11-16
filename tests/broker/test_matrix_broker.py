@@ -292,18 +292,23 @@ async def test_matrix_broker_shutdown_proper_shutdown(test_matrix_broker):
     # create MatrixBroker object
     matrix_broker: MatrixBroker = await test_matrix_broker()
 
+    await matrix_broker.startup()
+
     # close the broker's REAL queue clients
     await matrix_broker.device_queue.client.close()
     await matrix_broker.mutex_queue.client.close()
     await matrix_broker.broadcast_queue.client.close()
+    await matrix_broker.replication_queue.client.close()
 
     # create mock queue clients for the broker
     mock_device_queue_client = AsyncMock()
     mock_broadcast_queue_client = AsyncMock()
     mock_mutex_queue_client = AsyncMock()
+    mock_replication_queue_client = AsyncMock()
     matrix_broker.device_queue.client = mock_device_queue_client
     matrix_broker.broadcast_queue.client = mock_broadcast_queue_client
     matrix_broker.mutex_queue.client = mock_mutex_queue_client
+    matrix_broker.replication_queue.client = mock_replication_queue_client
 
     # shut down the MatrixBroker object
     await matrix_broker.shutdown()
@@ -312,6 +317,7 @@ async def test_matrix_broker_shutdown_proper_shutdown(test_matrix_broker):
     matrix_broker.device_queue.client.close.assert_called_once()
     matrix_broker.broadcast_queue.client.close.assert_called_once()
     matrix_broker.mutex_queue.client.close.assert_called_once()
+    matrix_broker.replication_queue.client.close.assert_called_once()
 
 
 @pytest.mark.integtest

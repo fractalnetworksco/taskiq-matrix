@@ -36,6 +36,8 @@ async def test_filters_get_sync_token_sync_error():
     test_client.sync.assert_called_once()
     assert str(e.value) == mock_response.message
 
+    await test_client.close()
+
 
 async def test_filters_get_sync_token_verify_next_batch():
     """
@@ -58,6 +60,8 @@ async def test_filters_get_sync_token_verify_next_batch():
     # returned matches what was set locally
     test_client.sync.assert_called_once()
     assert result == "abc"
+
+    await test_client.close()
 
 
 async def test_filters_run_sync_filter_sync_error():
@@ -83,6 +87,8 @@ async def test_filters_run_sync_filter_sync_error():
     # same as the one set locally
     test_client.sync.assert_called_once()
     assert str(e.value) == mock_response.message
+
+    await test_client.close()
 
 
 async def test_filters_run_sync_filter_false_content_only():
