@@ -80,6 +80,8 @@ async def test_get_result_no_result():
     with pytest.raises(Exception):
         assert await result_backend.get_result(task_id=task_id, with_logs=False)
 
+    await result_backend.shutdown()
+
 
 async def test_get_result_decode_error():
     """
@@ -106,6 +108,8 @@ async def test_get_result_decode_error():
     with patch("pickle.loads", side_effect=Exception):
         with pytest.raises(Exception):
             await result_backend.get_result(task_id=task_id, with_logs=False)
+
+    await result_backend.shutdown()
 
 
 @pytest.mark.skip(

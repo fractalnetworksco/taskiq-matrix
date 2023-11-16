@@ -173,18 +173,23 @@ class MatrixBroker(AsyncBroker):
         """
         from .tasks import update_checkpoint
 
-        while True:
-            try:
-                # run both updates in parallel
-                await asyncio.gather(
-                    update_checkpoint("device"),
-                    update_checkpoint("broadcast"),
-                    update_checkpoint("replication"),
-                )
-            except Exception as err:
-                self.logger.log(f"Encountered error in update_device_checkpoint: {err}", "error")
+        try:
+            while True:
+                try:
+                    # run both updates in parallel
+                    await asyncio.gather(
+                        update_checkpoint("device"),
+                        update_checkpoint("broadcast"),
+                        update_checkpoint("replication"),
+                    )
+                except Exception as err:
+                    self.logger.log(
+                        f"Encountered error in update_device_checkpoint: {err}", "error"
+                    )
 
-            await asyncio.sleep(interval)
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            return None
 
     async def startup(self) -> None:
         """
@@ -206,7 +211,7 @@ class MatrixBroker(AsyncBroker):
         await self.add_mutex_checkpoint_task()
 
         # launch brackground task that updates device checkpoints
-        asyncio.create_task(self.update_device_checkpoints())
+        self.checkpoint_updater = asyncio.create_task(self.update_device_checkpoints())
 
         return None
 
@@ -215,6 +220,9 @@ class MatrixBroker(AsyncBroker):
         Shuts down the broker.
         """
         self.logger.log("Shutting down the broker", "info")
+        self.checkpoint_updater.cancel()
+        await self.checkpoint_updater
+
         await self.device_queue.shutdown()
         await self.broadcast_queue.shutdown()
         await self.mutex_queue.shutdown()
