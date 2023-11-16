@@ -10,7 +10,11 @@ from uuid import uuid4
 from nio import RoomGetStateEventError, RoomPutStateError
 from taskiq import AckableMessage, AsyncBroker, AsyncResultBackend, BrokerMessage
 
-from .exceptions import LockAcquireError, ScheduledTaskRequiresTaskIdLabel
+from .exceptions import (
+    DeviceQueueRequiresDeviceLabel,
+    LockAcquireError,
+    ScheduledTaskRequiresTaskIdLabel,
+)
 from .filters import EMPTY_FILTER, run_sync_filter
 from .lock import MatrixLock
 from .log import Logger
@@ -68,7 +72,6 @@ class MatrixBroker(AsyncBroker):
             self.room_id = os.environ["MATRIX_ROOM_ID"]
         except KeyError as e:
             raise KeyError(f"Missing required environment variable: {e}")
-        print("Broker constructor called")
 
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
         self.mutex_queue = MatrixQueue("mutex", room_id=self.room_id)
@@ -254,7 +257,6 @@ class MatrixBroker(AsyncBroker):
         ):
             await run_sync_filter(self.result_backend.matrix_client, EMPTY_FILTER, timeout=0)
 
-        print(f"\nGot labels: {message.labels}\n")
         queue_name = message.labels.get("queue", "mutex")
         device_name = message.labels.get("device")
         queue: MatrixQueue = (
@@ -263,7 +265,7 @@ class MatrixBroker(AsyncBroker):
 
         if queue == self.device_queue:
             if not device_name:
-                raise Exception("Device queue requires a device label")
+                raise DeviceQueueRequiresDeviceLabel(message.task_id)
             msgtype = queue.task_types.device_task(device_name)
             queue_name = "device"
         else:
@@ -302,7 +304,6 @@ class MatrixBroker(AsyncBroker):
             message = self._use_task_id(message.labels["task_id"], message)
             message_body = message.message.decode("utf-8")
 
-        print(f"Queue task type: {queue.task_types.task}")
         # regular task was kicked, simply send message into room
         return await send_message(
             queue.client,

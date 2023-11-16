@@ -187,6 +187,7 @@ class MatrixQueue:
         homeserver_url: str = os.environ.get("MATRIX_HOMESERVER_URL", ""),
         access_token: str = os.environ.get("MATRIX_ACCESS_TOKEN", ""),
         room_id: str = os.environ.get("MATRIX_ROOM_ID", ""),
+        device_name: str = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname()),
     ):
         if not homeserver_url:
             raise Exception(
@@ -206,7 +207,7 @@ class MatrixQueue:
         self.name = name
         self.checkpoint = Checkpoint(type=name, client=self.client, room_id=room_id)
         self.task_types = TaskTypes(name)
-        self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
+        self.device_name = device_name
         self.room_id = room_id
 
     async def verify_room_exists(self) -> None:
@@ -377,6 +378,21 @@ class ReplicatedQueue(BroadcastQueue):
     Replicated queues are broadcast queues whose checkpoints are device specific.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        name: str,
+        *args,
+        homeserver_url: str = os.environ.get("MATRIX_HOMESERVER_URL", ""),
+        access_token: str = os.environ.get("MATRIX_ACCESS_TOKEN", ""),
+        room_id: str = os.environ.get("MATRIX_ROOM_ID", ""),
+        **kwargs,
+    ):
+        super().__init__(
+            name,
+            *args,
+            homeserver_url=homeserver_url,
+            access_token=access_token,
+            room_id=room_id,
+            **kwargs,
+        )
         self.checkpoint.type = f"{self.checkpoint.type}.{self.device_name}"

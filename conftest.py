@@ -1,15 +1,20 @@
 import asyncio
 import json
 import os
-from typing import Generator
+from typing import Awaitable, Callable, Generator
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse
 from taskiq.message import BrokerMessage
-from taskiq_matrix.matrix_broker import BroadcastQueue, MatrixBroker, MatrixQueue
+from taskiq_matrix.matrix_broker import (
+    BroadcastQueue,
+    MatrixBroker,
+    MatrixQueue,
+    ReplicatedQueue,
+)
 from taskiq_matrix.matrix_queue import Checkpoint
-from unittest.mock import MagicMock
 
 try:
     TEST_HOMESERVER_URL = os.environ["MATRIX_HOMESERVER_URL"]
@@ -30,25 +35,39 @@ def matrix_client() -> Generator[AsyncClient, None, None]:
 
 
 @pytest.fixture(scope="function")
-def test_matrix_broker(matrix_client: AsyncClient):
+def new_matrix_room(matrix_client: AsyncClient):
+    """
+    Creates a new room and returns its room id.
+    """
+
+    async def create():
+        res = await matrix_client.room_create(name="test_room")
+        if isinstance(res, RoomCreateError):
+            raise Exception("Failed to create test room")
+        return res.room_id
+
+    return create
+
+
+@pytest.fixture(scope="function")
+def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
     async def create():
         """
         Creates a MatrixBroker instance whose queues are configured to
         use a new room each time the fixture is called.
         """
+        room_id = await new_matrix_room()
+
         broker = MatrixBroker()
 
-        # create a new room
-        res = await matrix_client.room_create(name="test_room")
-        if isinstance(res, RoomCreateError):
-            raise Exception("Failed to create test room")
-
-        room_id = res.room_id
+        # set the broker's room id
+        broker.room_id = room_id
 
         # recreate the broker's queues using the new room id
         broker.mutex_queue = MatrixQueue(broker.mutex_queue.name, room_id=room_id)
         broker.device_queue = MatrixQueue(broker.device_queue.name, room_id=room_id)
         broker.broadcast_queue = BroadcastQueue(broker.broadcast_queue.name, room_id=room_id)
+        broker.replication_queue = ReplicatedQueue(broker.replication_queue.name, room_id=room_id)
 
         return broker
 
@@ -74,6 +93,7 @@ def test_broker_message():
 
     # create the BrokerMessage object
     return BrokerMessage(task_id=task_id, task_name="test_name", message=message_bytes, labels={})
+
 
 @pytest.fixture(scope="function")
 def test_checkpoint():

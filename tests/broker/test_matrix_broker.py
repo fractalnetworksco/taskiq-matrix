@@ -1,18 +1,24 @@
 import json
 import os
+from typing import Awaitable, Callable
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
 from nio import (
+    AsyncClient,
     RoomGetStateEventError,
     RoomGetStateEventResponse,
     RoomPutStateError,
     RoomPutStateResponse,
 )
 from taskiq.message import BrokerMessage
-from taskiq_matrix.exceptions import ScheduledTaskRequiresTaskIdLabel
+from taskiq_matrix.exceptions import (
+    DeviceQueueRequiresDeviceLabel,
+    ScheduledTaskRequiresTaskIdLabel,
+)
 from taskiq_matrix.matrix_broker import LockAcquireError, MatrixBroker
+from taskiq_matrix.matrix_queue import MatrixQueue
 
 
 async def test_matrix_broker_environment_not_set():
@@ -500,3 +506,48 @@ async def test_matrix_broker_kick_no_scheduled_task(test_matrix_broker, test_bro
                 task_id="abcd",
                 queue=matrix_broker.mutex_queue.name,
             )
+
+
+async def test_kick_device_queue_raises_exception_if_no_device_label(
+    matrix_client: AsyncClient,
+    test_matrix_broker: Callable[[], Awaitable[MatrixBroker]],
+    test_broker_message: BrokerMessage,
+):
+    """
+    Tasks kicked to the Device queue should raise an exception if the task
+    does not have a device label.
+    """
+    broker = await test_matrix_broker()
+
+    laptop_queue = MatrixQueue(
+        "device.laptop",
+        homeserver_url=matrix_client.homeserver,
+        access_token=matrix_client.access_token,
+        room_id=broker.room_id,
+        device_name="laptop",
+    )
+    desktop_queue = MatrixQueue(
+        "device.desktop",
+        homeserver_url=matrix_client.homeserver,
+        access_token=matrix_client.access_token,
+        room_id=broker.room_id,
+        device_name="desktop",
+    )
+
+    # ensure the replication queue label is set
+    test_broker_message.labels = {"queue": "device"}
+
+    # kick task to replication queue
+    with pytest.raises(DeviceQueueRequiresDeviceLabel):
+        await broker.kick(test_broker_message)
+
+    _, laptop_tasks = await laptop_queue.get_unacked_tasks(timeout=0)
+    _, desktop_tasks = await desktop_queue.get_unacked_tasks(timeout=0)
+
+    # neither queue should have the task since it was never kicked
+    assert len(laptop_tasks) == 0
+    assert len(desktop_tasks) == 0
+
+    # cleanup
+    await laptop_queue.shutdown()
+    await desktop_queue.shutdown()

@@ -57,3 +57,12 @@ class ScheduledTaskRequiresTaskIdLabel(TaskIQMatrixError, SendTaskError):
         super().__init__(
             f"Scheduled task {task_id} is missing the task_id label. Scheduled tasks must have a task_id label."
         )
+
+
+class DeviceQueueRequiresDeviceLabel(TaskIQMatrixError, SendTaskError):
+    """Error if a device queue task is missing the device label."""
+
+    def __init__(self, task_id: str):
+        super().__init__(
+            f'Device queue task {task_id} is missing the device label. When Device queue is specified, the task must have a "device" label.'
+        )
