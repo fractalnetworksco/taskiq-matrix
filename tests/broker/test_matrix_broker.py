@@ -265,9 +265,9 @@ async def test_matrix_broker_add_mutex_checkpoint_task_lock_fail(test_matrix_bro
 
 @pytest.mark.integtest
 @pytest.mark.skip(
-    reason="update_device_checkpoints is an infinite loop. need to figure out how to test infinite loop"
+    reason="update_checkpoints is an infinite loop. need to figure out how to test infinite loop"
 )
-async def test_matrix_broker_update_device_checkpoints(test_matrix_broker):
+async def test_matrix_broker_update_checkpoints(test_matrix_broker):
     """
     Stuck in a while True statement
     """
@@ -278,7 +278,7 @@ async def test_matrix_broker_update_device_checkpoints(test_matrix_broker):
     with patch(
         "taskiq_matrix.tasks.update_checkpoint", new=AsyncMock()
     ) as mock_update_checkpoint:
-        await matrix_broker.update_device_checkpoints(mock_interval)
+        await matrix_broker.update_checkpoints(mock_interval)
 
         mock_update_checkpoint.assert_has_calls([call("device"), call("broadcast")])
 
@@ -370,13 +370,13 @@ async def test_matrix_broker_startup(test_matrix_broker):
 
     # mock matrix broker function
     matrix_broker.add_mutex_checkpoint_task = AsyncMock()
-    matrix_broker.update_device_checkpoints = AsyncMock()
+    matrix_broker.update_checkpoints = AsyncMock()
 
     res = await matrix_broker.startup()
 
     # verify that the applicable functions were only called once
     matrix_broker.add_mutex_checkpoint_task.assert_called_once()
-    matrix_broker.update_device_checkpoints.assert_called_once()
+    matrix_broker.update_checkpoints.assert_called_once()
 
 
 async def test_matrix_broker_kick_functional_test(test_matrix_broker, test_broker_message):
