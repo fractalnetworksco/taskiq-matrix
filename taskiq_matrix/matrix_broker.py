@@ -159,13 +159,10 @@ class MatrixBroker(AsyncBroker):
             self.logger.log(f"{e}\n\n")
             return False
 
-    async def update_device_checkpoints(self, interval: int = 60):
+    async def update_checkpoints(self, interval: int = 60):
         """
-        Background task that periodically updates the device and broadcast
-        queue checkpoints.
-
-        Note: Figure out how to test block of code in infinite loop.
-            The infinite loop makes this currently untestable
+        Background task that periodically updates the device, broadcast,
+        and replication queue checkpoints.
 
         Args:
             interval (int): The interval in seconds to update the checkpoints.
@@ -210,8 +207,8 @@ class MatrixBroker(AsyncBroker):
         # ensure that checkpoint schedule task is added to schedules
         await self.add_mutex_checkpoint_task()
 
-        # launch brackground task that updates device checkpoints
-        self.checkpoint_updater = asyncio.create_task(self.update_device_checkpoints())
+        # launch background task that updates device checkpoints
+        self.checkpoint_updater = asyncio.create_task(self.update_checkpoints())
 
         return None
 

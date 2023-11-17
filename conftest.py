@@ -43,7 +43,9 @@ def new_matrix_room(matrix_client: AsyncClient):
     async def create():
         res = await matrix_client.room_create(name="test_room")
         if isinstance(res, RoomCreateError):
+            await matrix_client.close()
             raise Exception("Failed to create test room")
+        await matrix_client.close()
         return res.room_id
 
     return create
