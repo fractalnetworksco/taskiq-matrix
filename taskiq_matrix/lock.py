@@ -10,7 +10,9 @@ from uuid import uuid4
 from nio import (
     AsyncClient,
     MatrixRoom,
+    MessageDirection,
     RoomGetStateEventError,
+    RoomMessagesError,
     RoomPutStateResponse,
     RoomSendResponse,
     SyncError,
@@ -28,6 +30,7 @@ class MatrixLock:
     """
 
     logger = logging.getLogger(__name__)
+    next_batch = None
 
     def __init__(
         self,
@@ -47,7 +50,10 @@ class MatrixLock:
         self.client.access_token = access_token
         self.room_id = room_id
         self.lock_id = str(uuid4())
-        self.next_batch = None
+        if MatrixLock.next_batch:
+            self.next_batch = MatrixLock.next_batch
+        else:
+            self.next_batch = None
         setup_console_logging()
 
     def create_filter(
@@ -137,8 +143,8 @@ class MatrixLock:
         finally:
             self.logger.info(f"Worker ({self.lock_id}) releasing lock: {key}")
             # update sync token before we release
-            await self.filter(self.create_filter(limit=0), timeout=0)
-            self.next_batch = self.client.next_batch
+            # await self.filter(self.create_filter(limit=0), timeout=0)
+            # self.next_batch = self.client.next_batch
             await self.send_message(
                 {"type": f"fn.lock.release.{key}"}, msgtype=f"fn.lock.release.{key}"
             )
@@ -152,7 +158,12 @@ class MatrixLock:
             wait (bool): whether to wait for the lock to be available
         """
         lock_types = [f"fn.lock.acquire.{key}", f"fn.lock.release.{key}"]
-        res = await self.filter(self.create_filter(types=lock_types), timeout=0)
+        if not self.next_batch:
+            self.next_batch = await self.get_latest_sync_token()
+            MatrixLock.next_batch = self.next_batch
+        res = await self.filter(
+            self.create_filter(types=lock_types), timeout=0, since=self.next_batch
+        )
         self.next_batch = self.client.next_batch
 
         # if last event is a lock release or the lock types dont exist in the room,
@@ -182,6 +193,8 @@ class MatrixLock:
         execute a filter with the client, optionally filter message body by kwargs
         attempts to deserialize json
         """
+        # since = self.next_batch or since
+        self.logger.info("Next batch is %s" % self.next_batch)
         res = await self.client.sync(timeout, sync_filter=filter, since=self.next_batch)
         if isinstance(res, SyncError):
             raise Exception(res.message)
@@ -204,3 +217,14 @@ class MatrixLock:
             for key in filter_keys:
                 d = {k: [i for i in v if i.get(key) == kwargs[key]] for k, v in d.items()}
         return d
+
+    async def get_latest_sync_token(self) -> str:
+        """
+        Returns the latest sync token for a room in constant time, using /sync with an empty filter takes longer as the room grows
+        """
+        res = await self.client.room_messages(
+            self.room_id, start="", limit=1, direction=MessageDirection.back
+        )
+        if not isinstance(res, RoomMessagesError):
+            return res.start
+        raise Exception(f"Failed to get sync token for room {self.room_id}")

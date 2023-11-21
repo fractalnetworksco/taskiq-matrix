@@ -1,3 +1,5 @@
+from typing import Any
+
 from nio import SyncError
 from taskiq.exceptions import (
     ResultBackendError,
@@ -66,3 +68,10 @@ class DeviceQueueRequiresDeviceLabel(TaskIQMatrixError, SendTaskError):
         super().__init__(
             f'Device queue task {task_id} is missing the device label. When Device queue is specified, the task must have a "device" label.'
         )
+
+
+class CheckpointGetOrInitError(TaskIQMatrixError):
+    """Error if get_or_init_checkpoint() fails."""
+
+    def __init__(self, queue: str):
+        super().__init__(f"Unable to get or init checkpoint for queue {queue}")
