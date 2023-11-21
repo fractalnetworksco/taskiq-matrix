@@ -4,7 +4,7 @@ import socket
 from base64 import b64decode, b64encode
 from typing import Dict, Optional, TypeVar, Union
 
-from nio import AsyncClient
+from nio import AsyncClient, MessageDirection, RoomMessagesError
 from taskiq import AsyncResultBackend
 from taskiq.result import TaskiqResult
 
@@ -106,13 +106,20 @@ class MatrixResultBackend(AsyncResultBackend):
 
         :returns: True if the result is ready else False.
         """
+        if not self.next_batch:
+            res = await self.matrix_client.room_messages(
+                self.room, start="", limit=1, direction=MessageDirection.back
+            )
+            if not isinstance(res, RoomMessagesError):
+                self.next_batch = res.start
+                self.matrix_client.next_batch = res.start
+
         sync_filter = create_filter(self.room, types=[f"taskiq.result.{task_id}"])
         # cache the next batch token from kick so we can use it later when getting the result
         # need to do this because when we sync below here, the client's next_batch token will
         # be updated to the latest sync token, which will be after the result we're looking for
-        self.next_batch = self.matrix_client.next_batch
         result = await run_sync_filter(
-            self.matrix_client, sync_filter, timeout=30000, since=self.matrix_client.next_batch
+            self.matrix_client, sync_filter, timeout=0, since=self.matrix_client.next_batch
         )
         return True if result.get(self.room) else False
 
