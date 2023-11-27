@@ -13,6 +13,7 @@ from nio import (
     RoomPutStateResponse,
 )
 from taskiq.message import BrokerMessage
+
 from taskiq_matrix.exceptions import (
     DeviceQueueRequiresDeviceLabel,
     ScheduledTaskRequiresTaskIdLabel,
@@ -474,8 +475,7 @@ async def test_matrix_broker_kick_lock_fail(test_matrix_broker, test_broker_mess
             mock_lock.assert_called_once()
 
 
-@pytest.mark.skip(reason="Need to verify that the task_id is being updated inside broker.message")
-async def test_matrix_broker_kick_no_scheduled_task(test_matrix_broker, test_broker_message):
+async def test_matrix_broker_kick_set_task_id(test_matrix_broker, test_broker_message):
     """
     Ensure that task id is updated when task_id is passed in the message.labels.
     """
@@ -485,6 +485,7 @@ async def test_matrix_broker_kick_no_scheduled_task(test_matrix_broker, test_bro
 
     # modify the labels property to add a scheduled_task and a task_id
     test_broker_message.labels = {"task_id": "abcd"}
+    test_broker_message_body = '{"task_id": "abcd", "foo": "bar"}'
 
     # mock send_message function
     mock_send_message = AsyncMock()
@@ -493,7 +494,6 @@ async def test_matrix_broker_kick_no_scheduled_task(test_matrix_broker, test_bro
     with patch("taskiq_matrix.matrix_broker.send_message", mock_send_message):
         with patch("taskiq_matrix.matrix_broker.MatrixLock", autospec=True) as mock_lock:
             async_gen = await matrix_broker.kick(test_broker_message)
-
             # verify that the lock function was not called
             mock_lock.assert_not_called()
 
@@ -501,7 +501,7 @@ async def test_matrix_broker_kick_no_scheduled_task(test_matrix_broker, test_bro
             mock_send_message.assert_called_with(
                 matrix_broker.mutex_queue.client,
                 matrix_broker.mutex_queue.room_id,
-                test_broker_message.message,
+                test_broker_message_body,
                 msgtype=matrix_broker.mutex_queue.task_types.task,
                 task_id="abcd",
                 queue=matrix_broker.mutex_queue.name,
