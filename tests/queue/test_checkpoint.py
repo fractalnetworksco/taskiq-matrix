@@ -5,16 +5,17 @@ from nio import (
     AsyncClient,
     RoomGetStateEventError,
     RoomGetStateEventResponse,
+    RoomMessagesError,
+    RoomMessagesResponse,
     RoomPutStateError,
     RoomPutStateResponse,
-    SyncResponse,
-    SyncError
+    SyncError,
 )
 
 from taskiq_matrix.matrix_queue import (
     Checkpoint,
+    CheckpointGetOrInitError,
     LockAcquireError,
-    MatrixSyncError,
 )
 
 
@@ -36,11 +37,10 @@ async def test_checkpoint_get_or_init_checkpoint_unknown_error(test_checkpoint):
         test_checkpoint.client.room_get_state_event.assert_called_once()
 
 
-async def test_checkpoint_get_or_init_checkpoint_sync_fail(test_checkpoint: Checkpoint):
+async def test_checkpoint_get_or_init_checkpoint_room_messages_fail(test_checkpoint: Checkpoint):
     """
     Tests that a MatrixSyncError is raised when sync() does not return a SyncResponse
     """
-
 
     # mock checkopint.client.room_get_state return value
     test_checkpoint.client.room_get_state_event.return_value = RoomGetStateEventError(
@@ -50,14 +50,14 @@ async def test_checkpoint_get_or_init_checkpoint_sync_fail(test_checkpoint: Chec
     # set sync to return a RoomGetStateEventError
     mock_response = MagicMock(spec=SyncError)
     mock_response.message = "Test Response Message"
-    test_checkpoint.client.sync.return_value = mock_response
+    test_checkpoint.client.room_messages.return_value = mock_response
 
     # raise an exception caused by the RoomGetStateEventError
-    with pytest.raises(MatrixSyncError):
+    with pytest.raises(CheckpointGetOrInitError):
         await test_checkpoint.get_or_init_checkpoint()
 
-        test_checkpoint.client.room_get_state_event.assert_called_once()
-        test_checkpoint.client.sync.assert_called_once()
+    test_checkpoint.client.room_get_state_event.assert_called_once()
+    test_checkpoint.client.room_messages.assert_called_once()
 
 
 async def test_checkpoint_get_or_init_checkpoint_verify_next_batch(test_checkpoint: Checkpoint):
@@ -66,21 +66,19 @@ async def test_checkpoint_get_or_init_checkpoint_verify_next_batch(test_checkpoi
     the next_batch value from that response is stored as the checkpoint's since_token attribute.
     """
 
-
     # mock checkopint.client.room_get_state return value
     test_checkpoint.client.room_get_state_event.return_value = RoomGetStateEventError(
         status_code="M_NOT_FOUND", message="Test Error Message"
     )
 
     # set sync to return a SyncResponse
-    mock_response = MagicMock(spec=SyncResponse)
-    test_checkpoint.client.sync.return_value = mock_response
+    mock_response = MagicMock(spec=RoomMessagesResponse)
+    mock_response.start = "test batch"
+    test_checkpoint.client.room_messages.return_value = mock_response
 
     # set the SyncResponse's next_batch
-    mock_response.next_batch = "test batch"
     mock_checkpoint_state = AsyncMock()
     test_checkpoint.put_checkpoint_state = mock_checkpoint_state
-
 
     since_token = await test_checkpoint.get_or_init_checkpoint()
 
@@ -88,8 +86,6 @@ async def test_checkpoint_get_or_init_checkpoint_verify_next_batch(test_checkpoi
     # and the since token created in the test method
     assert since_token == test_checkpoint.since_token == "test batch"
     test_checkpoint.put_checkpoint_state.assert_called_with(since_token)
-
-    
 
 
 async def test_checkpoint_get_or_init_checkpoint_verify_since(test_checkpoint: Checkpoint):
@@ -101,20 +97,18 @@ async def test_checkpoint_get_or_init_checkpoint_verify_since(test_checkpoint: C
 
     # create a mock response object
     mock_response = MagicMock(spec=RoomGetStateEventResponse)
-    mock_response.content = {
-        "checkpoint": "abc"
-    }
+    mock_response.content = {"checkpoint": "abc"}
 
     # set room_get_state_event to return the mock response object
     test_checkpoint.client.room_get_state_event.return_value = mock_response
 
-    # call get_or_init_checkpoint and verify the since token is consistent 
+    # call get_or_init_checkpoint and verify the since token is consistent
     since_token = await test_checkpoint.get_or_init_checkpoint()
     assert since_token == test_checkpoint.since_token == "abc"
 
 
 async def test_checkpoint_put_checkpoint_state_lock_error(test_checkpoint: Checkpoint):
-    """ 
+    """
     Tests that the function returns False if the MatrixLock().lock() function
     fails
     """
@@ -126,9 +120,7 @@ async def test_checkpoint_put_checkpoint_state_lock_error(test_checkpoint: Check
     since_token = str(test_checkpoint.since_token)
 
     # patch the MatrixLock().lock() function and have it raise a LockAcquireError
-    with patch(
-        "taskiq_matrix.matrix_queue.MatrixLock", autospec=True
-    ) as mock_lock:
+    with patch("taskiq_matrix.matrix_queue.MatrixLock", autospec=True) as mock_lock:
         lock_instance = mock_lock.return_value
         lock_instance.lock.side_effect = LockAcquireError("Test Error")
 
@@ -136,8 +128,9 @@ async def test_checkpoint_put_checkpoint_state_lock_error(test_checkpoint: Check
         res = await test_checkpoint.put_checkpoint_state(since_token)
 
         # verify that the function returns False and that room_put_state() was not called
-        assert res == False 
+        assert res == False
         test_checkpoint.client.room_put_state.assert_not_called()
+
 
 async def test_checkpoint_put_checkpoint_state_state_error(test_checkpoint: Checkpoint):
     """
@@ -153,13 +146,14 @@ async def test_checkpoint_put_checkpoint_state_state_error(test_checkpoint: Chec
     # store the since_token
     since_token = str(test_checkpoint.since_token)
 
-    # call put_checkpoint_state and store the result 
+    # call put_checkpoint_state and store the result
     res = await test_checkpoint.put_checkpoint_state(since_token)
-    
-    # verify that the function returned false and that 
+
+    # verify that the function returned false and that
     # room_put_state() was called once
-    assert res == False 
+    assert res == False
     test_checkpoint.client.room_put_state.assert_called_once()
+
 
 async def test_checkpoint_put_checkpoint_state_checkpoint_set(test_checkpoint: Checkpoint):
     """
@@ -168,27 +162,30 @@ async def test_checkpoint_put_checkpoint_state_checkpoint_set(test_checkpoint: C
     """
 
     # set room_put_state to return a RoomPutStateEventResponse
-    test_checkpoint.client.room_put_state.return_value = RoomPutStateResponse(event_id="abc", room_id="abc")
+    test_checkpoint.client.room_put_state.return_value = RoomPutStateResponse(
+        event_id="abc", room_id="abc"
+    )
 
     # store the since token
     since_token = str(test_checkpoint.since_token)
 
-    # call put_checkpoint_state and store the result 
+    # call put_checkpoint_state and store the result
     res = await test_checkpoint.put_checkpoint_state(since_token)
-    
-    # verify that the function retruned True, since_token is equal to the 
+
+    # verify that the function retruned True, since_token is equal to the
     # checkpoint object's since_token property, and that room_put_state() was
     # only called once
     assert res == True
     assert since_token == str(test_checkpoint.since_token)
     test_checkpoint.client.room_put_state.assert_called_once()
 
+
 async def test_checkpoint_create_checkpoint():
     """
     Tests the creation of a checkpoint object using the create() class method.
     """
 
-    # create a mock client 
+    # create a mock client
     mock_client_parameter = MagicMock(spec=AsyncClient)
 
     # set room_get_state_event to return a RoomGetStateEventResponse

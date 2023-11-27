@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from nio import AsyncClient, SyncError
+from nio import AsyncClient, MessageDirection, SyncError
 
 EMPTY_FILTER = {
     "presence": {"limit": 0, "types": []},

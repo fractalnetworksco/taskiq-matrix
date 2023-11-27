@@ -14,9 +14,10 @@ pytest = { version = "^7.4.2", optional = true }
 pytest-asyncio = { version = "^0.21.1", optional = true }
 pytest-cov = { version = "^4.1.0", optional = true }
 pytest-mock = { version = "^3.11.1", optional = true }
+ipython = { version = "^8.17.2", optional = true }
 
 [tool.poetry.extras]
-dev = ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "docker"]
+dev = ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "docker", "ipython"]
 
 
 [build-system]

@@ -102,7 +102,6 @@ class MatrixBroker(AsyncBroker):
             "args": ["mutex"],
             "kwargs": {},
         }
-
         schedules = await self.mutex_queue.client.room_get_state_event(
             self.mutex_queue.room_id,
             SCHEDULE_STATE_TYPE,
@@ -194,6 +193,7 @@ class MatrixBroker(AsyncBroker):
 
         Will exit if the initial sync fails or the provided room is not found.
         """
+        self.logger.log("Starting up broker", "info")
         await super().startup()
 
         # create and initialize queues
@@ -214,6 +214,7 @@ class MatrixBroker(AsyncBroker):
         """
         Shuts down the broker.
         """
+        self.logger.log("Shutting down the broker", "info")
         await self.device_queue.shutdown()
         await self.broadcast_queue.shutdown()
         await self.mutex_queue.shutdown()

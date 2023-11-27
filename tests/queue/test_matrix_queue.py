@@ -90,7 +90,7 @@ async def test_matrix_queue_get_tasks_return_tasks():
             "taskiq_matrix.matrix_queue.run_sync_filter", new=AsyncMock()
         ) as mock_sync_filter:
             mock_sync_filter.return_value = {matrix_queue.room_id: test_task_list}
-            result = await matrix_queue.get_tasks()
+            result = await matrix_queue.get_tasks(timeout=0)
 
             # verify that the function returned the same tasks that were created locally
             for i in range(len(result)):
@@ -202,7 +202,7 @@ async def test_matrix_queue_get_unacked_tasks_mixed_tasks(test_matrix_broker):
 
     # verify that a list of size 1 is returned containing the only unacked
     # task that was sent to the queue
-    result = await matrix_queue.get_unacked_tasks()
+    result = await matrix_queue.get_unacked_tasks(timeout=0)
     assert isinstance(result[1], list)
     assert len(result[1]) == 1
     assert result[1][0].type == event3["msgtype"]
@@ -253,7 +253,7 @@ async def test_matrix_queue_get_unacked_tasks_only_acked_tasks(test_matrix_broke
     )
 
     # verify that a list of size 0 is returned
-    result = await matrix_queue.get_unacked_tasks()
+    result = await matrix_queue.get_unacked_tasks(timeout=0)
     assert isinstance(result[1], list)
     assert len(result[1]) == 0
 
@@ -303,7 +303,7 @@ async def test_matrix_queue_get_unacked_tasks_only_unacked_tasks(test_matrix_bro
 
     # verify that a list of size 2 is returned containing both of the unacked
     # tasks sent to the queue
-    result = await matrix_queue.get_unacked_tasks()
+    result = await matrix_queue.get_unacked_tasks(timeout=0)
     assert isinstance(result[1], list)
     assert len(result[1]) == 2
 

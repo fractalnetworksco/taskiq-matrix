@@ -5,10 +5,18 @@ import socket
 from functools import partial
 from typing import Dict, List, Optional, Tuple
 
-from nio import AsyncClient, RoomGetStateEventError, RoomPutStateError, SyncResponse
+from nio import (
+    AsyncClient,
+    MessageDirection,
+    RoomGetStateEventError,
+    RoomMessagesError,
+    RoomMessagesResponse,
+    RoomPutStateError,
+    SyncResponse,
+)
 from taskiq import AckableMessage
 
-from .exceptions import LockAcquireError, MatrixSyncError, TaskAlreadyAcked
+from .exceptions import CheckpointGetOrInitError, LockAcquireError, TaskAlreadyAcked
 from .filters import EMPTY_FILTER, create_filter, run_sync_filter
 from .lock import MatrixLock
 from .log import Logger
@@ -114,14 +122,18 @@ class Checkpoint:
             self.logger.log(f"No checkpoint found for type: {self.type}", "debug")
 
             # fetch latest sync token
-            res = await self.client.sync(timeout=0, sync_filter=EMPTY_FILTER)
-            if not isinstance(res, SyncResponse):
-                raise MatrixSyncError(f"Failed to sync: {res.message}")
-
+            res = await self.client.room_messages(
+                self.room_id,
+                start="",
+                limit=1,
+                direction=MessageDirection.back,
+            )
+            if not isinstance(res, RoomMessagesResponse):
+                raise CheckpointGetOrInitError(self.type)
             # update the checkpoint state in the Matrix room
-            await self.put_checkpoint_state(res.next_batch)
+            await self.put_checkpoint_state(res.start)
 
-            self.since_token = res.next_batch
+            self.since_token = res.start
             return self.since_token
         else:
             # got back some checkpoint state, use the checkpoint value
