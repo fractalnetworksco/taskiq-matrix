@@ -1,16 +1,9 @@
-import asyncio
 import logging
-import os
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
-from aiofiles import open as aopen
-from aiofiles.os import listdir
 from nio.responses import RoomGetStateEventError
 from taskiq import ScheduledTask
 from taskiq.abc.schedule_source import ScheduleSource
-from taskiq.scheduler.scheduler import ScheduledTask
-
-from .matrix_broker import MatrixBroker
 
 SCHEDULE_DIR = "/schedules"
 
@@ -19,72 +12,74 @@ logging.getLogger("nio").setLevel(logging.WARNING)
 SCHEDULE_STATE_TYPE = "taskiq.schedules"
 
 
-class FileScheduleSource(ScheduleSource):
-    """File schedule source."""
+# class FileScheduleSource(ScheduleSource):
+#     """File schedule source."""
 
-    def __init__(self, broker: "MatrixBroker") -> None:
-        self.broker = broker
+#     def __init__(self, broker: "MatrixBroker") -> None:
+#         self.broker = broker
 
-    async def shutdown(self) -> None:
-        await self.broker.shutdown()
-        await super().shutdown()
+#     async def shutdown(self) -> None:
+#         await self.broker.shutdown()
+#         await super().shutdown()
 
-    async def get_schedules(self) -> List["ScheduledTask"]:
-        """
-        Collect schedules for all tasks.
+#     async def get_schedules(self) -> List["ScheduledTask"]:
+#         """
+#         Collect schedules for all tasks.
 
-        This function checks labels for all tasks available to the broker.
+#         This function checks labels for all tasks available to the broker.
 
-        If task has a schedule label, it will be parsed and returned.
+#         If task has a schedule label, it will be parsed and returned.
 
-        :return: list of schedules.
-        """
-        schedules = []
-        schedule_files = await self.load_schedule_files()
-        broker_tasks = self.broker.get_all_tasks()
-        for task in schedule_files:
-            if task["name"] not in broker_tasks.keys():
-                raise Exception("Got schedule for non-existant task: {}".format(task["name"]))
-            if broker_tasks[task["name"]].broker != self.broker:
-                continue
-            if "cron" not in task and "time" not in task:
-                raise Exception("Schedule for task {} has no cron or time".format(task["name"]))
-            labels = task.get("labels", {})
-            labels.update(broker_tasks[task["name"]].labels)
-            schedules.append(
-                ScheduledTask(
-                    task_name=task["name"],
-                    labels=labels,
-                    args=task.get("args", []),
-                    kwargs=task.get("kwargs", {}),
-                    cron=task.get("cron"),
-                    time=task.get("time"),
-                ),
-            )
-        return schedules
+#         :return: list of schedules.
+#         """
+#         schedules = []
+#         schedule_files = await self.load_schedule_files()
+#         broker_tasks = self.broker.get_all_tasks()
+#         for task in schedule_files:
+#             if task["name"] not in broker_tasks.keys():
+#                 raise Exception("Got schedule for non-existant task: {}".format(task["name"]))
+#             if broker_tasks[task["name"]].broker != self.broker:
+#                 continue
+#             if "cron" not in task and "time" not in task:
+#                 raise Exception("Schedule for task {} has no cron or time".format(task["name"]))
+#             labels = task.get("labels", {})
+#             labels.update(broker_tasks[task["name"]].labels)
+#             schedules.append(
+#                 ScheduledTask(
+#                     task_name=task["name"],
+#                     labels=labels,
+#                     args=task.get("args", []),
+#                     kwargs=task.get("kwargs", {}),
+#                     cron=task.get("cron"),
+#                     time=task.get("time"),
+#                 ),
+#             )
+#         return schedules
 
-    async def list_schedule_files(self) -> List[str]:
-        return [f for f in await listdir(SCHEDULE_DIR) if ".yml" in f or ".yaml" in f]
+#     async def list_schedule_files(self) -> List[str]:
+#         return [f for f in await listdir(SCHEDULE_DIR) if ".yml" in f or ".yaml" in f]
 
-    def pre_send(self, task: ScheduledTask) -> Coroutine[Any, Any, None] | None:
-        print(f"Scheduled task: {task}")
-        return super().pre_send(task)
+#     def pre_send(self, task: ScheduledTask) -> Coroutine[Any, Any, None] | None:
+#         print(f"Scheduled task: {task}")
+#         return super().pre_send(task)
 
-    async def load_schedule_files(self) -> List[dict]:
-        task_files = await self.list_schedule_files()
-        tasks = []
-        for task_file in task_files:
-            async with aopen(os.path.join(SCHEDULE_DIR, task_file), "r") as f:
-                loop = asyncio.get_event_loop()
-                schedule = await loop.run_in_executor(None, yaml.safe_load, await f.read())
-                tasks.append(schedule)
-        return tasks
+#     async def load_schedule_files(self) -> List[dict]:
+#         task_files = await self.list_schedule_files()
+#         tasks = []
+#         for task_file in task_files:
+#             async with aopen(os.path.join(SCHEDULE_DIR, task_file), "r") as f:
+#                 loop = asyncio.get_event_loop()
+#                 schedule = await loop.run_in_executor(None, yaml.safe_load, await f.read())
+#                 tasks.append(schedule)
+#         return tasks
 
 
 class MatrixRoomScheduleSource(ScheduleSource):
     """Schedule source based on the `taskiq.schedules` state key in a Matrix Room."""
 
     def __init__(self, broker: Any) -> None:
+        from .matrix_broker import MatrixBroker
+
         if not isinstance(broker, MatrixBroker):
             raise TypeError(f"MatrixRoomScheduleSource expected MatrixBroker, got {type(broker)}")
 
