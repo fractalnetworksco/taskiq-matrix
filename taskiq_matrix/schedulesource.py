@@ -16,6 +16,8 @@ SCHEDULE_DIR = "/schedules"
 
 logging.getLogger("nio").setLevel(logging.WARNING)
 
+SCHEDULE_STATE_TYPE = "taskiq.schedules"
+
 
 class FileScheduleSource(ScheduleSource):
     """File schedule source."""
@@ -86,7 +88,6 @@ class MatrixRoomScheduleSource(ScheduleSource):
         if not isinstance(broker, MatrixBroker):
             raise TypeError(f"MatrixRoomScheduleSource expected MatrixBroker, got {type(broker)}")
 
-        self.schedule_state_name = "taskiq.schedules"
         self.broker = broker
 
     async def startup(self) -> None:
@@ -147,7 +148,7 @@ class MatrixRoomScheduleSource(ScheduleSource):
         # for now all schedules for all queues are stored in the same state
         resp = await self.broker.mutex_queue.client.room_get_state_event(
             self.broker.room_id,
-            self.schedule_state_name,
+            SCHEDULE_STATE_TYPE,
         )
         if isinstance(resp, RoomGetStateEventError):
             if resp.status_code == "M_NOT_FOUND":
