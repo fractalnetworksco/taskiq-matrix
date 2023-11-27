@@ -20,6 +20,7 @@ from .lock import MatrixLock
 from .log import Logger
 from .matrix_queue import BroadcastQueue, MatrixQueue, ReplicatedQueue, Task
 from .matrix_result_backend import MatrixResultBackend
+from .schedulesource import SCHEDULE_STATE_TYPE
 from .utils import send_message
 
 logging.getLogger("nio").setLevel(logging.WARNING)
@@ -27,7 +28,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-SCHEDULE_STATE_TYPE = "taskiq.schedules"
 
 
 class MatrixBroker(AsyncBroker):
