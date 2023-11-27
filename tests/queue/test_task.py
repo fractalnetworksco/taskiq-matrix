@@ -2,6 +2,8 @@ from taskiq_matrix.matrix_queue import Task, AckableMessage
 import json
 import pytest
 
+
+@pytest.mark.integtest  # depends on json.loads
 async def test_task_verify_constructor():
     """
     Test that the data passed to the Task constructor matches what is in the task
@@ -28,6 +30,7 @@ async def test_task_verify_constructor():
     assert test_task.data == json.loads(task_event["body"]["task"])
     assert test_task.queue == task_event["body"]["queue"]
 
+@pytest.mark.integtest  # depends on NotImplementedError
 async def test_task_yield_task_raise_error():
     """
     Test that calling yield_task() raises a NotImplementedError

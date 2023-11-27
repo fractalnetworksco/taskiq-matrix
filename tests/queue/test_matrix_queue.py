@@ -9,6 +9,7 @@ from taskiq_matrix.matrix_queue import LockAcquireError, MatrixQueue, Task
 from taskiq_matrix.utils import send_message
 
 
+@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_verify_room_exists_error():
     """
     Tests that an exception is raised if room_get_state_evetnt() returns a
@@ -29,6 +30,7 @@ async def test_matrix_queue_verify_room_exists_error():
     await matrix_queue.client.close()
 
 
+@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_verify_room_exists_exists():
     """
     Tests that an exception is not raised if a RoomGetStateEventResponse
@@ -52,6 +54,7 @@ async def test_matrix_queue_verify_room_exists_exists():
     await matrix_queue.client.close()
 
 
+@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_get_tasks_return_tasks():
     """
     Tests that all tasks are returned by get_tasks()
@@ -100,6 +103,7 @@ async def test_matrix_queue_get_tasks_return_tasks():
                 assert result[i].queue == expected_tasks[i].queue
 
 
+@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_filter_acked_tasks_proper_filter():
     """
     Test that filter_acked_tasks returns only the Tasks that have
@@ -145,6 +149,7 @@ async def test_matrix_queue_filter_acked_tasks_proper_filter():
     assert unacked_tasks[0] == test_task_objects[0]
 
 
+@pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_get_unacked_tasks_mixed_tasks(test_matrix_broker):
     """
     Tests that the dictionary returned by get_unacked_tasks() contains only the
@@ -211,6 +216,7 @@ async def test_matrix_queue_get_unacked_tasks_mixed_tasks(test_matrix_broker):
     await test_broker.shutdown()
 
 
+@pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_get_unacked_tasks_only_acked_tasks(test_matrix_broker):
     """
     Tests that get_unacked_tasks() returns a list of size 0 if there are no unacknowledged
@@ -260,6 +266,7 @@ async def test_matrix_queue_get_unacked_tasks_only_acked_tasks(test_matrix_broke
     await test_broker.shutdown()
 
 
+@pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_get_unacked_tasks_only_unacked_tasks(test_matrix_broker):
     """
     Tests that a list of multiple unacked tasks are returned if there are
@@ -310,6 +317,7 @@ async def test_matrix_queue_get_unacked_tasks_only_unacked_tasks(test_matrix_bro
     await test_broker.shutdown()
 
 
+@pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_all_tasks_acked_unacked_tasks_only(test_matrix_broker):
     """
     Tests that att_tasks_acked() returns false if there are only
@@ -355,6 +363,7 @@ async def test_matrix_queue_all_tasks_acked_unacked_tasks_only(test_matrix_broke
     assert await matrix_queue.all_tasks_acked() == False
 
 
+@pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_all_tasks_acked_acked_tasks_only(test_matrix_broker):
     """
     Tests that all_tasks_acked() returns True if there are only acked tasks in
@@ -400,6 +409,7 @@ async def test_matrix_queue_all_tasks_acked_acked_tasks_only(test_matrix_broker)
     assert await matrix_queue.all_tasks_acked()
 
 
+@pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_all_tasks_acked_mixed_tasks(test_matrix_broker):
     """
     Tests that all_tasks_acked() returns False if there are both acked and unacked
@@ -458,6 +468,7 @@ async def test_matrix_queue_all_tasks_acked_mixed_tasks(test_matrix_broker):
     assert await matrix_queue.all_tasks_acked() == False
 
 
+@pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_task_is_acked_unacked_task(test_matrix_broker):
     """
     Tests that task_is_acked() returns False if it is given an unacked task.
@@ -492,6 +503,7 @@ async def test_matrix_queue_task_is_acked_unacked_task(test_matrix_broker):
     assert await matrix_queue.task_is_acked(event2["task_id"]) == False
 
 
+@pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_task_is_acked_acked_task(test_matrix_broker):
     """
     Tests that task_is_acked returns True of it is given an acknowledged task
@@ -526,6 +538,7 @@ async def test_matrix_queue_task_is_acked_acked_task(test_matrix_broker):
     assert await matrix_queue.task_is_acked(event2["task_id"])
 
 
+@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_ack_msg_uses_given_id():
     """
     Tests that ack_msg uses the task_id that is provided
@@ -559,6 +572,7 @@ async def test_matrix_queue_ack_msg_uses_given_id():
         )
 
 
+@pytest.mark.integtest  # depends on Task
 async def test_matrix_queue_yield_task_lock_fail():
     """
     Tests that if the MatrixLock.lock() fails in the try block, an
@@ -593,6 +607,7 @@ async def test_matrix_queue_yield_task_lock_fail():
             matrix_queue.task_is_acked.assert_not_caled()
 
 
+@pytest.mark.integtest  # depends on Task
 async def test_matrix_queue_yield_task_already_acked():
     """
     Tests that a yielded task tha has been acked will raise
@@ -626,6 +641,7 @@ async def test_matrix_queue_yield_task_already_acked():
         assert e == "Task 1 has already been acked"
 
 
+@pytest.mark.integtest  # depends on Task
 async def test_matrix_queue_yield_task_not_acked():
     """
     Tests that a yielded tast that has not been acknowledged will

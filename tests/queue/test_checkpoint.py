@@ -19,9 +19,10 @@ from taskiq_matrix.matrix_queue import (
 )
 
 
+@pytest.mark.integtest # depends on "isinstance" function 
 async def test_checkpoint_get_or_init_checkpoint_unknown_error(test_checkpoint):
     """
-    Tests that an erro is raised when "M_NOT_FOUND" is not the status code when
+    Tests that an error is raised when "M_NOT_FOUND" is not the status code when
     room_get_state_event() returns a RoomGetStateEventError
     """
 
@@ -37,6 +38,7 @@ async def test_checkpoint_get_or_init_checkpoint_unknown_error(test_checkpoint):
         test_checkpoint.client.room_get_state_event.assert_called_once()
 
 
+@pytest.mark.integtest # depends on "isinstance" function 
 async def test_checkpoint_get_or_init_checkpoint_room_messages_fail(test_checkpoint: Checkpoint):
     """
     Tests that a MatrixSyncError is raised when sync() does not return a SyncResponse
@@ -60,6 +62,7 @@ async def test_checkpoint_get_or_init_checkpoint_room_messages_fail(test_checkpo
     test_checkpoint.client.room_messages.assert_called_once()
 
 
+@pytest.mark.integtest # depends on "isinstance" function 
 async def test_checkpoint_get_or_init_checkpoint_verify_next_batch(test_checkpoint: Checkpoint):
     """
     Tests that the since token that if a RoomGetStateEventError is returned by room_get_state_event(),
@@ -88,6 +91,7 @@ async def test_checkpoint_get_or_init_checkpoint_verify_next_batch(test_checkpoi
     test_checkpoint.put_checkpoint_state.assert_called_with(since_token)
 
 
+@pytest.mark.integtest # depends on "isinstance" function 
 async def test_checkpoint_get_or_init_checkpoint_verify_since(test_checkpoint: Checkpoint):
     """
     Tests that if no exceptions are raised, and room_get_state_event() returns a
@@ -107,6 +111,7 @@ async def test_checkpoint_get_or_init_checkpoint_verify_since(test_checkpoint: C
     assert since_token == test_checkpoint.since_token == "abc"
 
 
+@pytest.mark.integtest # depends on LockAcquireError class
 async def test_checkpoint_put_checkpoint_state_lock_error(test_checkpoint: Checkpoint):
     """
     Tests that the function returns False if the MatrixLock().lock() function
@@ -132,6 +137,7 @@ async def test_checkpoint_put_checkpoint_state_lock_error(test_checkpoint: Check
         test_checkpoint.client.room_put_state.assert_not_called()
 
 
+@pytest.mark.integtest # depends on MatrixLock
 async def test_checkpoint_put_checkpoint_state_state_error(test_checkpoint: Checkpoint):
     """
     Tests that put_checkpoint_state() raises an error if it encounters a
@@ -155,6 +161,7 @@ async def test_checkpoint_put_checkpoint_state_state_error(test_checkpoint: Chec
     test_checkpoint.client.room_put_state.assert_called_once()
 
 
+@pytest.mark.integtest # depends on MatrixLock
 async def test_checkpoint_put_checkpoint_state_checkpoint_set(test_checkpoint: Checkpoint):
     """
     Tests that put_checkpoint_state() returns True and sets the checkpoint's since_token
@@ -180,6 +187,7 @@ async def test_checkpoint_put_checkpoint_state_checkpoint_set(test_checkpoint: C
     test_checkpoint.client.room_put_state.assert_called_once()
 
 
+@pytest.mark.integtest # depends on get_or_init_checkpoint
 async def test_checkpoint_create_checkpoint():
     """
     Tests the creation of a checkpoint object using the create() class method.

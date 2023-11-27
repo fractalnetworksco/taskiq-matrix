@@ -82,7 +82,7 @@ async def test_matrix_broker_with_result_backend_no_exception(test_matrix_broker
 
     assert result.result_backend == test_result_backend
 
-
+@pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_unknown_error(test_matrix_broker):
     """
     Tests exception raised if room get state event in the mutex queue
@@ -148,6 +148,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_RoomGetStateEventError_no
     )
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_integration_test(test_matrix_broker):
     """
     Verify true functionality
@@ -177,6 +178,7 @@ async def test_matrix_broker_integration_test(test_matrix_broker):
     assert schedules.content["tasks"][0]["kwargs"] == {}
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_content_errcode(test_matrix_broker):
     """
     Test that an exception is raised when room_get_state_event returns a
@@ -204,6 +206,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_content_errcode(test_matr
         await broker.add_mutex_checkpoint_task()
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_checkpoint_exists(test_matrix_broker):
     """
     Test that function returns True if the chekpoint already exists and
@@ -244,6 +247,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_checkpoint_exists(test_ma
         mock_room_put_state.assert_not_called()
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_update_schedule(test_matrix_broker):
     """
     Tests that updating the schedule returns True when room_put_state
@@ -276,6 +280,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_update_schedule(test_matr
         mock_room_put_state.assert_called_once()
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_put_state_error(test_matrix_broker):
     """
     Tests that function returns False if room_put_state returns
@@ -308,6 +313,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_put_state_error(test_matr
         mock_room_put_state.assert_called_once()
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_lock_fail(test_matrix_broker):
     """
     Tests that the function returns False if the MatrixLock().lock(SCHEDULE_STATE_TYPE)
@@ -346,6 +352,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_lock_fail(test_matrix_bro
         assert not result
 
 
+@pytest.mark.integtest
 @pytest.mark.skip(
     reason="update_device_checkpoints is an infinite loop. need to figure out how to test infinite loop"
 )
@@ -365,6 +372,7 @@ async def test_matrix_broker_update_device_checkpoints(test_matrix_broker):
         mock_update_checkpoint.assert_has_calls([call("device"), call("broadcast")])
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_shutdown_proper_shutdown(test_matrix_broker):
     """
     Test that the MatrixBroker object properly shuts down
@@ -395,6 +403,7 @@ async def test_matrix_broker_shutdown_proper_shutdown(test_matrix_broker):
     matrix_broker.mutex_queue.client.close.assert_called_once()
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_use_task_id(test_matrix_broker):
     """
     Tests that broker message task_id can be replaced with a chosen task_id
@@ -433,6 +442,7 @@ async def test_matrix_broker_use_task_id(test_matrix_broker):
     assert json_dictionary["task_id"] == task_id
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_startup(test_matrix_broker):
     """
     Tests that all functions are called on startup
@@ -452,6 +462,7 @@ async def test_matrix_broker_startup(test_matrix_broker):
     matrix_broker.update_device_checkpoints.assert_called_once()
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_kick_functional_test(test_matrix_broker, test_broker_message):
     """
     Tests that kick calls send_message with the appropriate information
@@ -520,6 +531,7 @@ async def test_matrix_broker_kick_sync_filter(test_matrix_broker, test_broker_me
             mock_message.assert_called_once()
 
 
+@pytest.mark.integtest
 async def test_matrix_broker_kick_no_task_id(test_matrix_broker, test_broker_message):
     """
     Test that a ValueError is raised when there is no task_id present in
@@ -540,6 +552,7 @@ async def test_matrix_broker_kick_no_task_id(test_matrix_broker, test_broker_mes
             mock_lock.assert_not_called()
 
 
+@pytest.mark.integtest
 @pytest.mark.skip(
     reason="Test needs to be updated since using task_id label will update the broker message task_id"
 )
@@ -574,6 +587,8 @@ async def test_matrix_broker_kick_lock_success(test_matrix_broker, test_broker_m
                 queue=matrix_broker.mutex_queue.name,
             )
 
+
+@pytest.mark.integtest
 async def test_matrix_broker_kick_lock_fail(test_matrix_broker, test_broker_message):
     """
     got coverage but need to figure out how to verify the exception was raised
@@ -600,6 +615,7 @@ async def test_matrix_broker_kick_lock_fail(test_matrix_broker, test_broker_mess
             mock_lock.assert_called_once()
 
 
+@pytest.mark.integtest
 @pytest.mark.skip(reason="Need to verify that the task_id is being updated inside broker.message")
 async def test_matrix_broker_kick_no_scheduled_task(test_matrix_broker, test_broker_message):
     """
@@ -634,7 +650,8 @@ async def test_matrix_broker_kick_no_scheduled_task(test_matrix_broker, test_bro
             )
 
 
-async def test_matrix_broker_kick_device_queue_raises_exception_if_no_device_label(
+@pytest.mark.integtest
+async def test_kick_device_queue_raises_exception_if_no_device_label(
     matrix_client: AsyncClient,
     test_matrix_broker: Callable[[], Awaitable[MatrixBroker]],
     test_broker_message: BrokerMessage,
