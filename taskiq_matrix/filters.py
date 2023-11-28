@@ -1,10 +1,11 @@
-from typing import Any, Dict, Optional
+from copy import deepcopy
+from typing import Any, Dict, Optional, Union
 from uuid import uuid4
 
 from fractal import FractalAsyncClient
 from nio import SyncError
 
-EMPTY_FILTER = {
+EMPTY_FILTER: Dict[str, Union[Dict[str, Any], str]] = {
     "presence": {"limit": 0, "types": []},
     "account_data": {"limit": 0, "types": []},
     "room": {
@@ -72,6 +73,8 @@ async def get_sync_token(client: FractalAsyncClient) -> str:
     """
     Runs an empty sync request and returns the next_batch token.
     """
+    sync_filter = deepcopy(EMPTY_FILTER)
+    sync_filter["request_id"] = str(uuid4())
     res = await client.sync(timeout=0, sync_filter=EMPTY_FILTER, since=None)
     if isinstance(res, SyncError):
         raise Exception(res.message)
