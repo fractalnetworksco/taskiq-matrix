@@ -6,16 +6,26 @@ from taskiq_matrix.filters import EMPTY_FILTER, create_filter, run_sync_filter
 from taskiq_matrix.matrix_broker import MatrixBroker
 
 
-@pytest.mark.skip(reason="This test is flakey. Seems to cause synapse to sync loop.")
+# @pytest.mark.skip(reason="This test is flakey. Seems to cause synapse to sync loop.")
+@pytest.mark.integtest
 async def test_run_sync_filter_respects_timeout(
     test_matrix_broker: Callable[[], Awaitable[MatrixBroker]],
 ):
     """
     Run sync filter should block if no new events are received and timeout is
-    set.
+    set. This test ensures that synapse respects the timeout parameter when
+    there are no new events.
+
+    To do this, we initially sync with a timeout of 0 seconds and empty filter
+    to get a latest since token. This since token should now cause synapse to
+    block since there are no new events. We then run a sync filter with the
+    created filter and a sleep task in parallel. The sleep task should finish
+    first and the sync filter should still be blocking.
+
+    FIXME: This test consistently causes synapse to sync loop. The test will
+    pass the first time, but if you run it again, it will fail.
     """
     broker = await test_matrix_broker()
-
     mutex_client = broker.mutex_queue.client
     room_id = broker.room_id
 
