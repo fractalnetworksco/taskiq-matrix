@@ -2,7 +2,7 @@ import asyncio
 from typing import Awaitable, Callable
 
 import pytest
-from taskiq_matrix.filters import create_filter, get_sync_token, run_sync_filter
+from taskiq_matrix.filters import create_filter, run_sync_filter
 from taskiq_matrix.matrix_broker import MatrixBroker
 
 
@@ -30,7 +30,7 @@ async def test_run_sync_filter_respects_timeout(
     room_id = broker.room_id
 
     # get a latest since token
-    latest_since_token = await get_sync_token(mutex_client)
+    latest_since_token = await mutex_client.get_latest_sync_token()
     broker.mutex_queue.checkpoint.since_token = latest_since_token
     mutex_client.next_batch = latest_since_token
 
