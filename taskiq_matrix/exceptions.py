@@ -1,6 +1,3 @@
-from typing import Any
-
-from nio import SyncError
 from taskiq.exceptions import (
     ResultBackendError,
     ResultGetError,

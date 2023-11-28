@@ -1,7 +1,8 @@
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from nio import AsyncClient, MessageDirection, SyncError
+from fractal import FractalAsyncClient
+from nio import SyncError
 
 EMPTY_FILTER = {
     "presence": {"limit": 0, "types": []},
@@ -67,7 +68,7 @@ def create_filter(
     }
 
 
-async def get_sync_token(client: AsyncClient) -> str:
+async def get_sync_token(client: FractalAsyncClient) -> str:
     """
     Runs an empty sync request and returns the next_batch token.
     """
@@ -78,7 +79,7 @@ async def get_sync_token(client: AsyncClient) -> str:
 
 
 async def run_sync_filter(
-    client: AsyncClient,
+    client: FractalAsyncClient,
     filter: dict,
     timeout: int = 30000,
     since: Optional[str] = None,

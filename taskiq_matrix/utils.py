@@ -2,7 +2,8 @@ import json
 import logging
 from typing import Any, Dict, Union
 
-from nio import AsyncClient, RoomSendResponse
+from fractal import FractalAsyncClient
+from nio import RoomSendResponse
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ def setup_console_logging():
 
 
 async def send_message(
-    matrix_client: AsyncClient,
+    matrix_client: FractalAsyncClient,
     room: str,
     message: Union[bytes, str, Dict[Any, Any]],
     msgtype: str = "taskiq.task",
