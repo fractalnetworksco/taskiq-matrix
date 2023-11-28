@@ -69,18 +69,6 @@ def create_filter(
     }
 
 
-async def get_sync_token(client: FractalAsyncClient) -> str:
-    """
-    Runs an empty sync request and returns the next_batch token.
-    """
-    sync_filter = deepcopy(EMPTY_FILTER)
-    sync_filter["request_id"] = str(uuid4())
-    res = await client.sync(timeout=0, sync_filter=EMPTY_FILTER, since=None)
-    if isinstance(res, SyncError):
-        raise Exception(res.message)
-    return res.next_batch
-
-
 async def run_sync_filter(
     client: FractalAsyncClient,
     filter: dict,

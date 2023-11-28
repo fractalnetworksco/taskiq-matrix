@@ -3,64 +3,9 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from fractal import FractalAsyncClient
 from nio import AsyncClient, SyncError, SyncResponse
-from taskiq_matrix.filters import (
-    create_filter,
-    get_first_unacked_task,
-    get_sync_token,
-    run_sync_filter,
-)
-
-
-async def test_filters_get_sync_token_sync_error():
-    """
-    Tests that an exception is raised if client.sync() returns a SyncError
-    """
-
-    # create an AsyncClient object
-    test_client = AsyncClient(user="test_user", homeserver="test_homeserver")
-
-    # set the sync method to return a SyncError and set it's error message
-    test_client.sync = AsyncMock()
-    mock_response = AsyncMock(spec=SyncError)
-    mock_response.message = "test error message"
-    test_client.sync.return_value = mock_response
-
-    # call get_sync_token to raise the exception
-    with pytest.raises(Exception) as e:
-        await get_sync_token(test_client)
-
-    # verify that sync was called and that the error message raised is the
-    # same as the one set locally
-    test_client.sync.assert_called_once()
-    assert str(e.value) == mock_response.message
-
-    await test_client.close()
-
-
-async def test_filters_get_sync_token_verify_next_batch():
-    """
-    Tests that the function returns the same next_batch as the one created locally
-    """
-
-    # create an AsyncClient object
-    test_client = AsyncClient(user="test_user", homeserver="test_homeserver")
-
-    # set the sync method to return a SyncResponse and set it's next_batch
-    test_client.sync = AsyncMock()
-    mock_response = AsyncMock(spec=SyncResponse)
-    mock_response.next_batch = "abc"
-    test_client.sync.return_value = mock_response
-
-    # call get_sync_token and store the result
-    result = await get_sync_token(test_client)
-
-    # verify that sync was called once and that the next_batch token that is
-    # returned matches what was set locally
-    test_client.sync.assert_called_once()
-    assert result == "abc"
-
-    await test_client.close()
+from taskiq_matrix.filters import create_filter, get_first_unacked_task, run_sync_filter
 
 
 async def test_filters_run_sync_filter_sync_error():
@@ -70,7 +15,7 @@ async def test_filters_run_sync_filter_sync_error():
     """
 
     # create an AsyncClient object
-    test_client = AsyncClient(user="test_user", homeserver="test_homeserver")
+    test_client = FractalAsyncClient(user="test_user", homeserver_url="test_homeserver")
 
     # set the sync method to return a SyncError and set it's error message
     test_client.sync = AsyncMock()
@@ -97,7 +42,7 @@ async def test_filters_run_sync_filter_false_content_only():
     """
 
     # create a mock AsyncClient object and mock its sync function
-    mock_client = MagicMock(spec=AsyncClient)
+    mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
 
@@ -143,7 +88,7 @@ async def test_filters_run_sync_filter_true_content_only():
     """
 
     # create a mock AsyncClient object and mock its sync function
-    mock_client = MagicMock(spec=AsyncClient)
+    mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
 
@@ -187,7 +132,7 @@ async def test_filters_run_sync_filter_with_kwargs():
     """
 
     # create a mock AsyncClient object and mock its sync function
-    mock_client = MagicMock(spec=AsyncClient)
+    mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
     content_only = False
@@ -241,7 +186,7 @@ async def test_filters_run_sync_filter_with_kwargs():
     assert result == expected_result
 
 
-@pytest.mark.integtest # ? "not" and "append" appear to be external functions
+@pytest.mark.integtest  # ? "not" and "append" appear to be external functions
 async def test_filters_get_first_unacked_task_mixed_tasks():
     """
     Tests that the first unacked task in a list is returned. Duplicate tasks are
@@ -274,7 +219,7 @@ async def test_filters_get_first_unacked_task_mixed_tasks():
     )
 
 
-@pytest.mark.integtest # depends on "append" and "not"
+@pytest.mark.integtest  # depends on "append" and "not"
 async def test_filters_get_first_unacked_task_only_acked_tasks():
     """
     Tests that no tasks are returned if no unacked tasks are passed to it
@@ -295,7 +240,7 @@ async def test_filters_get_first_unacked_task_only_acked_tasks():
     assert result == {}
 
 
-@pytest.mark.integtest # depends on uuid
+@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_with_limit():
     """
     Tests that create_filter returns a dictionary with the same room_id and limit that
@@ -314,7 +259,7 @@ async def test_filters_create_filter_with_limit():
     assert filter["room"]["timeline"]["limit"] == test_limit
 
 
-@pytest.mark.integtest # depends on uuid
+@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_no_limit():
     """
     Tests that a dictionary with the correct room_id and missing the limit key is
