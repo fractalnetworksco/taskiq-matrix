@@ -2,7 +2,7 @@ import asyncio
 from typing import Awaitable, Callable
 
 import pytest
-from taskiq_matrix.filters import EMPTY_FILTER, create_filter, run_sync_filter
+from taskiq_matrix.filters import create_filter, get_sync_token, run_sync_filter
 from taskiq_matrix.matrix_broker import MatrixBroker
 
 
@@ -29,12 +29,10 @@ async def test_run_sync_filter_respects_timeout(
     mutex_client = broker.mutex_queue.client
     room_id = broker.room_id
 
-    # run a sync filter using an empty sync filter and a timeout of 0 seconds in order to get latest since token on your client
-    # (client.next_batch should have that after running the filter)
-    await run_sync_filter(mutex_client, EMPTY_FILTER, timeout=0)
-
-    latest_since_token = mutex_client.next_batch
+    # get a latest since token
+    latest_since_token = await get_sync_token(mutex_client)
     broker.mutex_queue.checkpoint.since_token = latest_since_token
+    mutex_client.next_batch = latest_since_token
 
     # create a sync filter that filters for taskiq.mutex.task and their acks (taskiq.mutex.task.ack.*)
     task_filter = create_filter(
@@ -50,7 +48,7 @@ async def test_run_sync_filter_respects_timeout(
 
     # wait for the first task to finish
     done, pending = await asyncio.wait(
-        [filter_task, sleep_task], return_when=asyncio.FIRST_COMPLETED
+        [sleep_task, filter_task], return_when=asyncio.FIRST_COMPLETED
     )
 
     assert sleep_task in done and filter_task in pending
