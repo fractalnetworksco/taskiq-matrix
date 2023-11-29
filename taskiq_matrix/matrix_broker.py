@@ -7,6 +7,7 @@ import socket
 from typing import Any, AsyncGenerator, List, Optional, Self, TypeVar
 from uuid import uuid4
 
+from fractal import FractalAsyncClient
 from nio import RoomGetStateEventError, RoomPutStateError
 from taskiq import AckableMessage, AsyncBroker, AsyncResultBackend, BrokerMessage
 
@@ -41,11 +42,12 @@ class MatrixBroker(AsyncBroker):
         self,
         result_backend: Optional[AsyncResultBackend] = None,
         task_id_generator: Any = None,
+        room_id: Optional[str] = None,
     ) -> None:
         """
         A taskiq broker backed by the Matrix protocol.
 
-        A MatrixBroker is comprised of three independent task queues:
+        A MatrixBroker is comprised of four independent task queues:
 
         - device_queue: a device's independent queue of tasks that are
         to be executed by only that device
@@ -53,11 +55,11 @@ class MatrixBroker(AsyncBroker):
         by all devices in a room (group)
         - mutex_queue: a queue of tasks that should be run by any (only one)
         device in a group
-
+        - replication_queue: a queue of tasks that should be run by each device
         Requires the following environment variables to be set:
         - MATRIX_HOMESERVER_URL
         - MATRIX_ACCESS_TOKEN
-        - MATRIX_ROOM_ID
+        - MATRIX_ROOM_ID (if room_id not provided as an argument)
 
         NOTE: Rate limiting for the configured user should be disabled:
         `insert into ratelimit_override values ("@mjolnir:my-homeserver.chat", 0, 0);`
@@ -69,7 +71,7 @@ class MatrixBroker(AsyncBroker):
         try:
             os.environ["MATRIX_HOMESERVER_URL"]
             os.environ["MATRIX_ACCESS_TOKEN"]
-            self.room_id = os.environ["MATRIX_ROOM_ID"]
+            self.room_id = room_id or os.environ["MATRIX_ROOM_ID"]
         except KeyError as e:
             raise KeyError(f"Missing required environment variable: {e}")
 
@@ -263,6 +265,13 @@ class MatrixBroker(AsyncBroker):
         queue: MatrixQueue = (
             self.device_queue if device_name else getattr(self, f"{queue_name}_queue")
         )
+        # use a fresh new client here because kicking a task can sometimes be from
+        # an ephemeral loop
+        client = FractalAsyncClient(
+            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
+            access_token=os.environ["MATRIX_ACCESS_TOKEN"],
+        )
+        room_id = message.labels.get("room_id", queue.room_id)
 
         if queue == self.device_queue:
             if not device_name:
@@ -288,8 +297,8 @@ class MatrixBroker(AsyncBroker):
                     message = self._use_task_id(task_id, message)
                     message_body = message.message
                     await send_message(
-                        queue.client,
-                        queue.room_id,
+                        client,
+                        room_id,
                         message_body,
                         msgtype=msgtype,
                         task_id=message.task_id,
@@ -306,14 +315,15 @@ class MatrixBroker(AsyncBroker):
             message_body = message.message.decode("utf-8")
 
         # regular task was kicked, simply send message into room
-        return await send_message(
-            queue.client,
-            queue.room_id,
+        await send_message(
+            client,
+            room_id,
             message_body,
             msgtype=msgtype,
             task_id=message.task_id,
             queue=queue_name,
         )
+        return await client.close()
 
     async def get_tasks(self) -> AsyncGenerator[List[Task], Any]:
         while True:
