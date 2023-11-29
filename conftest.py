@@ -4,9 +4,10 @@ import os
 from typing import Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
+from fractal import FractalAsyncClient
 
 import pytest
-from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse
+from nio import RoomCreateError, RoomGetStateEventResponse
 from taskiq.message import BrokerMessage
 from taskiq_matrix.matrix_broker import (
     BroadcastQueue,
@@ -27,15 +28,15 @@ except KeyError:
 
 
 @pytest.fixture(scope="function")
-def matrix_client() -> Generator[AsyncClient, None, None]:
-    client = AsyncClient(homeserver=TEST_HOMESERVER_URL)
+def matrix_client() -> Generator[FractalAsyncClient, None, None]:
+    client = FractalAsyncClient()
     client.access_token = TEST_USER_ACCESS_TOKEN
     yield client
     asyncio.run(client.close())
 
 
 @pytest.fixture(scope="function")
-def new_matrix_room(matrix_client: AsyncClient):
+def new_matrix_room(matrix_client: FractalAsyncClient):
     """
     Creates a new room and returns its room id.
     """
@@ -97,7 +98,7 @@ def test_broker_message():
 
 @pytest.fixture(scope="function")
 def test_checkpoint():
-    mock_client_parameter = MagicMock(spec=AsyncClient)
+    mock_client_parameter = MagicMock(spec=FractalAsyncClient)
     mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
         content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id="test room"
     )

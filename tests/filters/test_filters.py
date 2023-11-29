@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from nio import AsyncClient, SyncError, SyncResponse
+from fractal import FractalAsyncClient
+from nio import SyncError, SyncResponse
 from taskiq_matrix.filters import (
     create_filter,
     get_first_unacked_task,
@@ -17,8 +18,8 @@ async def test_filters_get_sync_token_sync_error():
     Tests that an exception is raised if client.sync() returns a SyncError
     """
 
-    # create an AsyncClient object
-    test_client = AsyncClient(user="test_user", homeserver="test_homeserver")
+    # create an FractalAsyncClient object
+    test_client = FractalAsyncClient()
 
     # set the sync method to return a SyncError and set it's error message
     test_client.sync = AsyncMock()
@@ -41,8 +42,8 @@ async def test_filters_get_sync_token_verify_next_batch():
     Tests that the function returns the same next_batch as the one created locally
     """
 
-    # create an AsyncClient object
-    test_client = AsyncClient(user="test_user", homeserver="test_homeserver")
+    # create an FractalAsyncClient object
+    test_client = FractalAsyncClient()
 
     # set the sync method to return a SyncResponse and set it's next_batch
     test_client.sync = AsyncMock()
@@ -65,8 +66,8 @@ async def test_filters_run_sync_filter_sync_error():
     client.sync()
     """
 
-    # create an AsyncClient object
-    test_client = AsyncClient(user="test_user", homeserver="test_homeserver")
+    # create an FractalAsyncClient object
+    test_client = FractalAsyncClient()
 
     # set the sync method to return a SyncError and set it's error message
     test_client.sync = AsyncMock()
@@ -90,8 +91,8 @@ async def test_filters_run_sync_filter_false_content_only():
     with a list of events
     """
 
-    # create a mock AsyncClient object and mock its sync function
-    mock_client = MagicMock(spec=AsyncClient)
+    # create a mock FractalAsyncClient object and mock its sync function
+    mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
 
@@ -136,8 +137,8 @@ async def test_filters_run_sync_filter_true_content_only():
     events
     """
 
-    # create a mock AsyncClient object and mock its sync function
-    mock_client = MagicMock(spec=AsyncClient)
+    # create a mock FractalAsyncClient object and mock its sync function
+    mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
 
@@ -180,8 +181,8 @@ async def test_filters_run_sync_filter_with_kwargs():
     Test that run_sync_filters properly filters events using kwargs
     """
 
-    # create a mock AsyncClient object and mock its sync function
-    mock_client = MagicMock(spec=AsyncClient)
+    # create a mock FractalAsyncClient object and mock its sync function
+    mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
     content_only = False
