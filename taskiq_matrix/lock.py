@@ -1,19 +1,16 @@
-import asyncio
 import json
 import logging
 import os
-from base64 import b64decode, b64encode
+from base64 import b64encode
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 from uuid import uuid4
 
+from fractal import FractalAsyncClient
 from nio import (
-    AsyncClient,
     MatrixRoom,
     MessageDirection,
-    RoomGetStateEventError,
     RoomMessagesError,
-    RoomPutStateResponse,
     RoomSendResponse,
     SyncError,
 )
@@ -46,7 +43,9 @@ class MatrixLock:
         if not room_id:
             raise Exception("MATRIX_ROOM_ID is required if not passed explicitly")
 
-        self.client = AsyncClient(homeserver_url)
+        self.client = FractalAsyncClient(
+            homeserver_url=homeserver_url, access_token=access_token, room_id=room_id
+        )
         self.client.access_token = access_token
         self.room_id = room_id
         self.lock_id = str(uuid4())

@@ -4,7 +4,8 @@ import socket
 from base64 import b64decode, b64encode
 from typing import Dict, Optional, TypeVar, Union
 
-from nio import AsyncClient, MessageDirection, RoomMessagesError
+from fractal import FractalAsyncClient
+from nio import MessageDirection, RoomMessagesError
 from taskiq import AsyncResultBackend
 from taskiq.result import TaskiqResult
 
@@ -32,10 +33,11 @@ class MatrixResultBackend(AsyncResultBackend):
         :param result_ex_time: expire time in seconds for result.
         :param result_px_time: expire time in milliseconds for result.
         """
-        self.matrix_client = AsyncClient(
-            homeserver=os.environ["MATRIX_HOMESERVER_URL"],
+        self.matrix_client = FractalAsyncClient(
+            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
+            access_token=os.environ["MATRIX_ACCESS_TOKEN"],
+            room_id=os.environ["MATRIX_ROOM_ID"],
         )
-        self.matrix_client.access_token = os.environ["MATRIX_ACCESS_TOKEN"]
         self.room = os.environ["MATRIX_ROOM_ID"]
         self.logger = Logger()
         self.result_ex_time = result_ex_time

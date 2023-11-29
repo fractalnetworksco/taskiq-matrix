@@ -1,23 +1,20 @@
-import asyncio
 import json
 import os
 import socket
 from functools import partial
 from typing import Dict, List, Optional, Tuple
 
+from fractal import FractalAsyncClient
 from nio import (
-    AsyncClient,
     MessageDirection,
     RoomGetStateEventError,
-    RoomMessagesError,
     RoomMessagesResponse,
     RoomPutStateError,
-    SyncResponse,
 )
 from taskiq import AckableMessage
 
 from .exceptions import CheckpointGetOrInitError, LockAcquireError, TaskAlreadyAcked
-from .filters import EMPTY_FILTER, create_filter, run_sync_filter
+from .filters import create_filter, run_sync_filter
 from .lock import MatrixLock
 from .log import Logger
 from .utils import send_message
@@ -79,7 +76,7 @@ class Checkpoint:
 
     type: str
     room_id: str
-    client: AsyncClient
+    client: FractalAsyncClient
     since_token: Optional[str] = None
     logger: Logger = Logger()
 
@@ -87,7 +84,7 @@ class Checkpoint:
         self,
         type: str,
         room_id: str,
-        client: AsyncClient,
+        client: FractalAsyncClient,
         since_token: Optional[str] = None,
         logger: Logger = Logger(),
     ):
@@ -171,7 +168,7 @@ class Checkpoint:
             return False
 
     @classmethod
-    async def create(cls, type: str, client: AsyncClient, room_id: str) -> "Checkpoint":
+    async def create(cls, type: str, client: FractalAsyncClient, room_id: str) -> "Checkpoint":
         """
         Create a Checkpoint instance for the given type.
         """
@@ -188,7 +185,7 @@ class MatrixQueue:
 
     name: str
     room_id: str
-    client: AsyncClient
+    client: FractalAsyncClient
     checkpoint: Checkpoint
     task_types: TaskTypes
     logger: Logger = Logger()
@@ -214,8 +211,9 @@ class MatrixQueue:
                 "MatrixQueue requires MATRIX_ROOM_ID environment variable set if not passed explicitly"
             )
 
-        self.client = AsyncClient(homeserver_url)
-        self.client.access_token = access_token
+        self.client = FractalAsyncClient(
+            homeserver_url=homeserver_url, access_token=access_token, room_id=room_id
+        )
         self.name = name
         self.checkpoint = Checkpoint(type=name, client=self.client, room_id=room_id)
         self.task_types = TaskTypes(name)
