@@ -51,7 +51,7 @@ async def update_checkpoint(queue_name: str) -> bool:
     # pull tasks for the broker's room
     tasks = tasks.get(queue.room_id)
     if tasks:
-        unacked_task = await get_first_unacked_task(tasks)
+        unacked_task = await get_first_unacked_task(tasks, queue.task_types)
         if unacked_task:
             event_id = unacked_task["event_id"]
 
