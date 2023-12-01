@@ -10,6 +10,7 @@ from nio import (
     RoomGetStateEventError,
     RoomMessagesResponse,
     RoomPutStateError,
+    WhoamiError,
 )
 from taskiq import AckableMessage
 
@@ -49,6 +50,7 @@ class Task:
     type: str
     data: str
     queue: str
+    sender: str
 
     def __init__(self, *args, **event):
         # FIXME: if event is malformed this will fail resulting in
@@ -57,6 +59,7 @@ class Task:
         self.type = event["msgtype"]
         self.data = json.loads(event["body"]["task"])
         self.queue = event["body"]["queue"]
+        self.sender = event["sender"]
 
     def __repr__(
         self,
@@ -244,8 +247,10 @@ class MatrixQueue:
             A list of tasks and acks.
         """
         next_batch = since_token or self.checkpoint.since_token
+
         task_filter = create_filter(
-            self.room_id, types=[self.task_types.task, f"{self.task_types.ack}.*"]
+            self.room_id,
+            types=[self.task_types.task, f"{self.task_types.ack}.*"],
         )
         task_events = await run_sync_filter(
             self.client, task_filter, timeout=timeout, since=next_batch
@@ -253,9 +258,16 @@ class MatrixQueue:
         tasks = [Task(**task) for task in task_events.get(self.room_id, [])]
         return tasks
 
-    def filter_acked_tasks(self, tasks: list["Task"]) -> list["Task"]:
+    def filter_acked_tasks(self, tasks: list["Task"], exclude_self: bool = False) -> list["Task"]:
         """
         Filter out all events that have been acked
+
+        Args:
+            tasks (list[Task]): The tasks to filter.
+            exclude_self (bool): Whether to exclude tasks that were sent by us.
+
+        Returns:
+            A list of unacked tasks.
         """
         task_dict: Dict[str, Task] = {}
         for task in tasks:
@@ -268,11 +280,23 @@ class MatrixQueue:
                 task_dict[task.id] = task
 
         # filter tasks that were not acknowledged and return them
-        unacked = [task for task in task_dict.values() if not task.acknowledged]
+        unacked = []
+        for task in task_dict.values():
+            if not task.acknowledged:
+                # if exclude_self is False, then append any unacked task
+                if not exclude_self:
+                    unacked.append(task)
+                # if exclude_self is True, then filter out tasks that were sent by us
+                # since we don't want to run tasks that we sent
+                elif task.sender != self.client.user_id:
+                    unacked.append(task)
+
         self.logger.log(f"{self.name} Unacked tasks: {unacked}", "info")
         return unacked
 
-    async def get_unacked_tasks(self, timeout: int = 30000) -> Tuple[str, List[Task]]:
+    async def get_unacked_tasks(
+        self, timeout: int = 30000, exclude_self: bool = False
+    ) -> Tuple[str, List[Task]]:
         """
         Args:
             timeout (int): The timeout to use when fetching tasks.
@@ -285,8 +309,16 @@ class MatrixQueue:
         task ids. This should result in only tasks that dont have acks, and
         should be more efficient since the filtering happens serverside.
         """
+        # ensure that the client has a user id. This is necessary when exclude_self
+        # is True since we need to know the client's user id to filter out tasks
+        # that were sent by us.
+        if not self.client.user_id:
+            whoami = await self.client.whoami()
+            if isinstance(whoami, WhoamiError):
+                raise Exception(whoami.message)
+
         tasks = await self.get_tasks(timeout=timeout, since_token=self.checkpoint.since_token)
-        unacked = self.filter_acked_tasks(tasks)
+        unacked = self.filter_acked_tasks(tasks, exclude_self=exclude_self)
         return self.name, unacked
 
     async def all_tasks_acked(self) -> bool:
@@ -322,6 +354,10 @@ class MatrixQueue:
                 "task_id": task_id,
                 "task": "{}",
             }
+        )
+        self.logger.log(
+            f"Sending ack for task {task_id} to room: {self.room_id}\nAck type: {self.task_types.ack}.{task_id}",
+            "debug",
         )
         await send_message(
             self.client,

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
+from fractal import FractalAsyncClient
 from nio import (
     AsyncClient,
     RoomGetStateEventError,
@@ -31,6 +32,7 @@ async def test_matrix_broker_environment_not_set():
     with patch.dict(os.environ, {}, clear=True):
         with pytest.raises(KeyError):
             mb = MatrixBroker()
+
 
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_unknown_error(test_matrix_broker):
@@ -371,35 +373,37 @@ async def test_matrix_broker_startup(test_matrix_broker):
     matrix_broker.update_device_checkpoints.assert_called_once()
 
 
-@pytest.mark.integtest
 async def test_matrix_broker_kick_functional_test(test_matrix_broker, test_broker_message):
     """
     Tests that kick calls send_message with the appropriate information
-    ~~~add to spreadsheet~~~
     """
     # create a MatrixBroker object
     matrix_broker: MatrixBroker = await test_matrix_broker()
+
+    mock_client = AsyncMock(spec=FractalAsyncClient)
+    mock_client.close = AsyncMock()
 
     # mock the send_message function
     mock_send_message = AsyncMock()
 
     # patch the send_message function and the MatrixLock.lock function
-    with patch("taskiq_matrix.matrix_broker.send_message", mock_send_message):
-        with patch("taskiq_matrix.matrix_broker.MatrixLock", autospec=True) as mock_lock:
-            # call kick
-            async_gen = await matrix_broker.kick(test_broker_message)
+    with patch("taskiq_matrix.matrix_broker.FractalAsyncClient", return_value=mock_client):
+        with patch("taskiq_matrix.matrix_broker.send_message", mock_send_message):
+            with patch("taskiq_matrix.matrix_broker.MatrixLock", autospec=True) as mock_lock:
+                # call kick
+                await matrix_broker.kick(test_broker_message)
 
-            # verify that mock lock was not called and that
-            # send_message was called with the appropriate information
-            mock_lock.assert_not_called()
-            mock_send_message.assert_called_with(
-                matrix_broker.mutex_queue.client,
-                matrix_broker.mutex_queue.room_id,
-                test_broker_message.message,
-                msgtype=matrix_broker.mutex_queue.task_types.task,
-                task_id=test_broker_message.task_id,
-                queue=matrix_broker.mutex_queue.name,
-            )
+                # verify that mock lock was not called and that
+                # send_message was called with the appropriate information
+                mock_lock.assert_not_called()
+                mock_send_message.assert_called_with(
+                    mock_client,
+                    matrix_broker.mutex_queue.room_id,
+                    test_broker_message.message,
+                    msgtype=matrix_broker.mutex_queue.task_types.task,
+                    task_id=test_broker_message.task_id,
+                    queue=matrix_broker.mutex_queue.name,
+                )
 
 
 @pytest.mark.integtest
