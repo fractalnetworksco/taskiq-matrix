@@ -6,7 +6,7 @@ authors = ["Mo Balaa <balaa@ether.ai>"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-taskiq = { git = "https://github.com/taskiq-python/taskiq.git", branch = "develop"}
+taskiq = { git = "https://github.com/taskiq-python/taskiq.git", branch = "develop", rev = "bba29c4dc383c48477f4969f0e8708a70d0cdea5" }
 # taskiq = "^0.10.2"
 matrix-nio = "^0.22.1"
 fractal-matrix = { git = "https://github.com/fractalnetworksco/fractal-matrix-client" }
