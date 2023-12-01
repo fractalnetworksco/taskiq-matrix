@@ -153,11 +153,11 @@ async def test_filters_run_sync_filter_true_content_only():
 
     # create a dictionary of mock event objects and assign them a room
     mock_client.sync.return_value.rooms.join["room1"].timeline.events = [
-        AsyncMock(source={"content": "event1", "sender": "test_sender1"}),
-        AsyncMock(source={"content": "event2", "sender": "test_sender2"}),
+        AsyncMock(source={"content": "event1"}, sender="sender1"),
+        AsyncMock(source={"content": "event2"}, sender="sender2"),
     ]
     mock_client.sync.return_value.rooms.join["room2"].timeline.events = [
-        AsyncMock(source={"content": "event3", "sender": "test_sender3"}),
+        AsyncMock(source={"content": "event3"}, sender="sender3"),
     ]
 
     # Call the run_sync_filter function
