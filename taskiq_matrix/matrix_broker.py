@@ -258,7 +258,8 @@ class MatrixBroker(AsyncBroker):
             isinstance(self.result_backend, MatrixResultBackend)
             and not self.result_backend.matrix_client.next_batch
         ):
-            await run_sync_filter(self.result_backend.matrix_client, EMPTY_FILTER, timeout=0)
+            since_token = await self.result_backend.matrix_client.get_latest_sync_token()
+            self.result_backend.matrix_client.next_batch = since_token
 
         queue_name = message.labels.get("queue", "mutex")
         device_name = message.labels.get("device")
@@ -266,7 +267,7 @@ class MatrixBroker(AsyncBroker):
             self.device_queue if device_name else getattr(self, f"{queue_name}_queue")
         )
         # use a fresh new client here because kicking a task can sometimes be from
-        # an ephemeral loop
+        # an ephemeral event loop
         client = FractalAsyncClient(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
@@ -338,7 +339,8 @@ class MatrixBroker(AsyncBroker):
                     self.mutex_queue.get_unacked_tasks(), name=self.mutex_queue.name
                 ),
                 self.replication_queue.name: asyncio.create_task(
-                    self.replication_queue.get_unacked_tasks(), name=self.replication_queue.name
+                    self.replication_queue.get_unacked_tasks(exclude_self=True),
+                    name=self.replication_queue.name,
                 ),
             }
             sync_tasks = [
