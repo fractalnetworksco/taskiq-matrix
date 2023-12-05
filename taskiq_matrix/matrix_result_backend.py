@@ -153,19 +153,19 @@ class MatrixResultBackend(AsyncResultBackend):
         try:
             result = result_object[self.room][0]
         except Exception as e:
-            self.logger.log(f"Error getting task result from Matrix {e}", "error")
+            logger.error(f"Error getting task result from Matrix {e}")
             raise ResultDecodeError()
 
         try:
             result = b64decode(result["body"]["task"]["value"])
         except Exception as e:
-            self.logger.log(f"Error loading result from returned task {e}", "error")
+            logger.error(f"Error loading result from returned task {e}")
             raise ResultDecodeError()
 
         try:
             taskiq_result: TaskiqResult[_ReturnType] = pickle.loads(result)
         except Exception as e:
-            self.logger.log(f"Error loading result as taskiq result: {e}", "error")
+            logger.error(f"Error loading result as taskiq result: {e}")
             raise ResultDecodeError()
 
         if not with_logs:
