@@ -1,3 +1,4 @@
+import logging
 import os
 import pickle
 import socket
@@ -21,6 +22,9 @@ from .utils import send_message
 _ReturnType = TypeVar("_ReturnType")
 
 
+logger = logging.getLogger(__name__)
+
+
 class MatrixResultBackend(AsyncResultBackend):
     def __init__(
         self,
@@ -39,7 +43,6 @@ class MatrixResultBackend(AsyncResultBackend):
             room_id=os.environ["MATRIX_ROOM_ID"],
         )
         self.room = os.environ["MATRIX_ROOM_ID"]
-        self.logger = Logger()
         self.result_ex_time = result_ex_time
         self.result_px_time = result_px_time
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())

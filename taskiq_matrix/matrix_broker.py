@@ -81,7 +81,6 @@ class MatrixBroker(AsyncBroker):
         self.broadcast_queue = BroadcastQueue("broadcast", room_id=self.room_id)
         self.replication_queue = ReplicatedQueue("replication", room_id=self.room_id)
         self.worker_id = uuid4().hex
-        self.logger = Logger()
 
     def with_result_backend(self, result_backend: AsyncResultBackend[_T]) -> Self:
         if not isinstance(result_backend, MatrixResultBackend):

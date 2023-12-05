@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import socket
 from functools import partial
@@ -17,8 +18,9 @@ from taskiq import AckableMessage
 from .exceptions import CheckpointGetOrInitError, LockAcquireError, TaskAlreadyAcked
 from .filters import create_filter, run_sync_filter
 from .lock import MatrixLock
-from .log import Logger
 from .utils import send_message
+
+logger = logging.getLogger(__name__)
 
 
 class TaskTypes:
@@ -81,7 +83,6 @@ class Checkpoint:
     room_id: str
     client: FractalAsyncClient
     since_token: Optional[str] = None
-    logger: Logger = Logger()
 
     def __init__(
         self,
@@ -89,13 +90,12 @@ class Checkpoint:
         room_id: str,
         client: FractalAsyncClient,
         since_token: Optional[str] = None,
-        logger: Logger = Logger(),
     ):
         self.type = type
         self.room_id = room_id
         self.client = client
         self.since_token = since_token
-        self.logger = logger
+        self.logger = logging.getLogger(__name__)
 
         # initialize checkpoint
         # loop = asyncio.new_event_loop()
@@ -191,7 +191,6 @@ class MatrixQueue:
     client: FractalAsyncClient
     checkpoint: Checkpoint
     task_types: TaskTypes
-    logger: Logger = Logger()
 
     def __init__(
         self,
