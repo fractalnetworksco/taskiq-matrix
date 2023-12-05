@@ -141,7 +141,7 @@ class MatrixLock:
         try:
             yield self.lock_id
         finally:
-            logger.info(f"Worker ({self.lock_id}) releasing lock: {key}")
+            logger.debug(f"Worker ({self.lock_id}) releasing lock: {key}")
             # update sync token before we release
             # await self.filter(self.create_filter(limit=0), timeout=0)
             # self.next_batch = self.client.next_batch
@@ -180,7 +180,7 @@ class MatrixLock:
                 return True
             else:
                 logger.info(
-                    f'Someone else got the {key} lock: Worker {res[self.room_id][0]["lock_id"]}'
+                    f'Unable to acquire lock {key}, worker {res[self.room_id][0]["lock_id"]} got it.'
                 )
                 return False
         else:

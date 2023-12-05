@@ -288,7 +288,7 @@ class MatrixQueue:
                 elif task.sender != self.client.user_id:
                     unacked.append(task)
 
-        logger.info(f"{self.name} Unacked tasks: {unacked}")
+        logger.debug(f"{self.name} Unacked tasks: {unacked}")
         return unacked
 
     async def get_unacked_tasks(

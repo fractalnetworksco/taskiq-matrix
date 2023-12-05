@@ -179,7 +179,7 @@ class MatrixBroker(AsyncBroker):
                     update_checkpoint("replication"),
                 )
             except Exception as err:
-                logger.error(f"Encountered error in update_device_checkpoint: {err}")
+                logger.warn(f"update_device_checkpoints: {err}")
 
             await asyncio.sleep(interval)
 
@@ -190,7 +190,7 @@ class MatrixBroker(AsyncBroker):
 
         Will exit if the initial sync fails or the provided room is not found.
         """
-        logger.info("Starting up broker")
+        logger.info("Starting Taskiq Matrix Broker")
         await super().startup()
 
         # create and initialize queues
