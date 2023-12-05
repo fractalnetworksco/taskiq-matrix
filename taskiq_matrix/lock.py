@@ -193,8 +193,7 @@ class MatrixLock:
         execute a filter with the client, optionally filter message body by kwargs
         attempts to deserialize json
         """
-        # since = self.next_batch or since
-        logger.info("Next batch is %s" % self.next_batch)
+        logger.debug("Next batch is %s" % self.next_batch)
         res = await self.client.sync(timeout, sync_filter=filter, since=self.next_batch)
         if isinstance(res, SyncError):
             raise Exception(res.message)
