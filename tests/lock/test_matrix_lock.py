@@ -243,7 +243,7 @@ async def test_matrix_lock_lock_LockAcquireError(new_matrix_room):
     
     assert "Could not acquire lock" in str(e.value)
 
-async def test_matrix_lock_lock(new_matrix_room):
+async def test_matrix_lock_lock_functional_test(new_matrix_room):
     """
     ? how do i check the yield
     """
@@ -283,14 +283,55 @@ async def test_matrix_lock_acquire_lock_no_next_batch():
             await lock._acquire_lock()
             mock_sync_token.assert_awaited_once()
     
-async def test_matrix_lock_acquire_lock_room_not_in_res():
+async def test_matrix_lock_acquire_lock_room_id_not_in_res():
     """
-    ! WIP
+    Tests that if the lock's room id doesn't match what is in the filter, the function
+    proceeds to the else block and returns false.
+    """
+    lock = MatrixLock()
+
+    mock_filter = AsyncMock()
+    mock_filter.return_value = {
+        lock.room_id: [
+            {
+                "type": 'fn.lock.acquire.None',
+                "lock_id": lock.lock_id
+            }
+        ]
+    }
+    lock.filter = mock_filter
+
+    mock_send_message = AsyncMock()
+    lock.send_message = mock_send_message
+
+    result = await lock._acquire_lock()
+    
+    mock_send_message.assert_not_called()
+    mock_filter.assert_called_once()
+    assert not result
+
+async def test_matrix_lock_acquire_lock_room_id_in_res():
+    """
+    Tests that the function returns True if the second filter acquires
+    acquires the lock.
     """
     lock = MatrixLock()
     mock_filter = AsyncMock()
-    mock_filter.return_value = {
-        "room_id": lock.room_id
+    second_call = {
+        lock.room_id: [
+            {
+                "type": 'fn.lock.acquire.None',
+                "lock_id": lock.lock_id
+            }
+        ]
     }
+    mock_filter.side_effect = [{}, second_call]
     lock.filter = mock_filter
-    await lock._acquire_lock()
+
+    mock_send_message = AsyncMock()
+    lock.send_message = mock_send_message
+
+    result = await lock._acquire_lock()
+    assert result
+    mock_send_message.assert_called_once()
+
