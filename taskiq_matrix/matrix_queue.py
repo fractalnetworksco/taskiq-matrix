@@ -4,7 +4,7 @@ import socket
 from functools import partial
 from typing import Dict, List, Optional, Tuple
 
-from fractal import FractalAsyncClient
+from fractal.matrix import FractalAsyncClient
 from nio import (
     MessageDirection,
     RoomGetStateEventError,

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
-from fractal import FractalAsyncClient
+from fractal.matrix import FractalAsyncClient
 from nio import (
     AsyncClient,
     RoomGetStateEventError,

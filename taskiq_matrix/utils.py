@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Any, Dict, Union
 
-from fractal import FractalAsyncClient
+from fractal.matrix import FractalAsyncClient
 from nio import RoomSendResponse
 
 logging.basicConfig(level=logging.WARNING)
