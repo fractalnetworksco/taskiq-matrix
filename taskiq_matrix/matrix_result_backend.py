@@ -4,7 +4,7 @@ import socket
 from base64 import b64decode, b64encode
 from typing import Dict, Optional, TypeVar, Union
 
-from fractal import FractalAsyncClient
+from fractal.matrix import FractalAsyncClient
 from nio import MessageDirection, RoomMessagesError
 from taskiq import AsyncResultBackend
 from taskiq.result import TaskiqResult
