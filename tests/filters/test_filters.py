@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 from fractal import FractalAsyncClient
-from nio import SyncError, SyncResponse
+from nio import SyncError, SyncResponse, UnknownEvent
 from taskiq_matrix.filters import (
     create_filter,
     get_first_unacked_task,
@@ -153,11 +153,20 @@ async def test_filters_run_sync_filter_true_content_only():
 
     # create a dictionary of mock event objects and assign them a room
     mock_client.sync.return_value.rooms.join["room1"].timeline.events = [
-        AsyncMock(source={"content": "event1"}, sender="sender1"),
-        AsyncMock(source={"content": "event2"}, sender="sender2"),
+        UnknownEvent(
+            source={"event_id": "abcd", "origin_server_ts": "hi", "sender": "sender1"},
+            type="org.homeserver.database",
+        ),
+        UnknownEvent(
+            source={"event_id": "abcd", "origin_server_ts": "hi", "sender": "sender2"},
+            type="org.homeserver.database",
+        ),
     ]
     mock_client.sync.return_value.rooms.join["room2"].timeline.events = [
-        AsyncMock(source={"content": "event3"}, sender="sender3"),
+        UnknownEvent(
+            source={"event_id": "abcd", "origin_server_ts": "hi", "sender": "sender3"},
+            type="org.homeserver.database",
+        ),
     ]
 
     # Call the run_sync_filter function
@@ -236,7 +245,7 @@ async def test_filters_run_sync_filter_with_kwargs():
     assert result == expected_result
 
 
-@pytest.mark.integtest # ? "not" and "append" appear to be external functions
+@pytest.mark.integtest  # ? "not" and "append" appear to be external functions
 async def test_filters_get_first_unacked_task_mixed_tasks():
     """
     Tests that the first unacked task in a list is returned. Duplicate tasks are
@@ -269,7 +278,7 @@ async def test_filters_get_first_unacked_task_mixed_tasks():
     )
 
 
-@pytest.mark.integtest # depends on "append" and "not"
+@pytest.mark.integtest  # depends on "append" and "not"
 async def test_filters_get_first_unacked_task_only_acked_tasks():
     """
     Tests that no tasks are returned if no unacked tasks are passed to it
@@ -290,7 +299,7 @@ async def test_filters_get_first_unacked_task_only_acked_tasks():
     assert result == {}
 
 
-@pytest.mark.integtest # depends on uuid
+@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_with_limit():
     """
     Tests that create_filter returns a dictionary with the same room_id and limit that
@@ -309,7 +318,7 @@ async def test_filters_create_filter_with_limit():
     assert filter["room"]["timeline"]["limit"] == test_limit
 
 
-@pytest.mark.integtest # depends on uuid
+@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_no_limit():
     """
     Tests that a dictionary with the correct room_id and missing the limit key is
