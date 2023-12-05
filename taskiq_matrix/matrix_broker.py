@@ -7,7 +7,7 @@ import socket
 from typing import Any, AsyncGenerator, List, Optional, Self, TypeVar
 from uuid import uuid4
 
-from fractal.matrix import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import RoomGetStateEventError, RoomPutStateError
 from taskiq import AckableMessage, AsyncBroker, AsyncResultBackend, BrokerMessage
 

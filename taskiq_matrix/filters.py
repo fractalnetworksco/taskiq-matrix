@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from fractal.matrix import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import SyncError
 
 EMPTY_FILTER = {
