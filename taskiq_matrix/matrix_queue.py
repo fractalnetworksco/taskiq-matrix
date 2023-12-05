@@ -95,7 +95,6 @@ class Checkpoint:
         self.room_id = room_id
         self.client = client
         self.since_token = since_token
-        self.logger = logging.getLogger(__name__)
 
         # initialize checkpoint
         # loop = asyncio.new_event_loop()

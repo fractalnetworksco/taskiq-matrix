@@ -16,7 +16,6 @@ from .exceptions import (
     ResultDecodeError,
 )
 from .filters import create_filter, run_sync_filter
-from .log import Logger
 from .utils import send_message
 
 _ReturnType = TypeVar("_ReturnType")
