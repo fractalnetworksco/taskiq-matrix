@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 from uuid import uuid4
 
-from fractal.matrix import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
     MatrixRoom,
     MessageDirection,
