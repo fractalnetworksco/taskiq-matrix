@@ -3,6 +3,8 @@ name = "taskiq-matrix"
 version = "0.1.0"
 description = ""
 authors = ["Mo Balaa <balaa@ether.ai>"]
+long_description=open('README.md', 'r').read(),
+long_description_content_type='text/markdown',
 
 [tool.poetry.dependencies]
 python = "^3.10"
