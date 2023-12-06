@@ -26,6 +26,10 @@ jobs:
       # IMPORTANT: this permission is mandatory for trusted publishing
       id-token: write
     steps:
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
       - name: Install Poetry & Build
         run: pip install poetry; poetry build
 
