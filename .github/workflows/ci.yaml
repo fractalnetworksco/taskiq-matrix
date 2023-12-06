@@ -26,8 +26,8 @@ jobs:
       # IMPORTANT: this permission is mandatory for trusted publishing
       id-token: write
     steps:
-      - name: Build 
-        run: python -m build
+      - name: Install Poetry & Build
+        run: pip install poetry; poetry build
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
