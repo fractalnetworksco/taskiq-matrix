@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import socket
 from functools import partial
@@ -17,8 +18,9 @@ from taskiq import AckableMessage
 from .exceptions import CheckpointGetOrInitError, LockAcquireError, TaskAlreadyAcked
 from .filters import create_filter, run_sync_filter
 from .lock import MatrixLock
-from .log import Logger
 from .utils import send_message
+
+logger = logging.getLogger(__name__)
 
 
 class TaskTypes:
@@ -81,7 +83,6 @@ class Checkpoint:
     room_id: str
     client: FractalAsyncClient
     since_token: Optional[str] = None
-    logger: Logger = Logger()
 
     def __init__(
         self,
@@ -89,13 +90,11 @@ class Checkpoint:
         room_id: str,
         client: FractalAsyncClient,
         since_token: Optional[str] = None,
-        logger: Logger = Logger(),
     ):
         self.type = type
         self.room_id = room_id
         self.client = client
         self.since_token = since_token
-        self.logger = logger
 
         # initialize checkpoint
         # loop = asyncio.new_event_loop()
@@ -119,7 +118,7 @@ class Checkpoint:
                 raise Exception(resp.message)
 
             # checkpoint state wasn't found, so initialize it
-            self.logger.log(f"No checkpoint found for type: {self.type}", "debug")
+            logger.debug(f"No checkpoint found for type: {self.type}")
 
             # fetch latest sync token
             res = await self.client.room_messages(
@@ -150,7 +149,7 @@ class Checkpoint:
         # acquire lock on checkpoint
         try:
             async with MatrixLock().lock(key=self.type):
-                self.logger.log(f"Setting checkpoint for type {self.type}", "debug")
+                logger.debug(f"Setting checkpoint for type {self.type}")
                 # set checkpoint
                 resp = await self.client.room_put_state(
                     self.room_id,
@@ -158,16 +157,14 @@ class Checkpoint:
                     {"checkpoint": since_token},
                 )
                 if isinstance(resp, RoomPutStateError):
-                    self.logger.log(
-                        f"Failed to set checkpoint for type {self.type}: {resp}", "error"
-                    )
+                    logger.error(f"Failed to set checkpoint for type {self.type}: {resp}")
                     return False
                 else:
                     self.since_token = since_token
                     return True
 
         except LockAcquireError as e:
-            self.logger.log(f"Failed to set checkpoint: {e}\n", "debug")
+            logger.debug(f"Failed to set checkpoint: {e}\n")
             return False
 
     @classmethod
@@ -191,7 +188,6 @@ class MatrixQueue:
     client: FractalAsyncClient
     checkpoint: Checkpoint
     task_types: TaskTypes
-    logger: Logger = Logger()
 
     def __init__(
         self,
@@ -291,7 +287,7 @@ class MatrixQueue:
                 elif task.sender != self.client.user_id:
                     unacked.append(task)
 
-        self.logger.log(f"{self.name} Unacked tasks: {unacked}", "info")
+        logger.debug(f"{self.name} Unacked tasks: {unacked}")
         return unacked
 
     async def get_unacked_tasks(
@@ -355,9 +351,8 @@ class MatrixQueue:
                 "task": "{}",
             }
         )
-        self.logger.log(
+        logger.debug(
             f"Sending ack for task {task_id} to room: {self.room_id}\nAck type: {self.task_types.ack}.{task_id}",
-            "debug",
         )
         await send_message(
             self.client,
@@ -393,9 +388,8 @@ class MatrixQueue:
             # encode task data
             task_data = json.dumps(task.data).encode("utf-8")
 
-            self.logger.log(
+            logger.info(
                 f"Yielding message {task.data} for task {task.id} to worker {self.device_name}",
-                "info",
             )
             return AckableMessage(
                 data=task_data,

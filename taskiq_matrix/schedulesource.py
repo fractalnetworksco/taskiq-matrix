@@ -9,6 +9,8 @@ SCHEDULE_DIR = "/schedules"
 
 logging.getLogger("nio").setLevel(logging.WARNING)
 
+logger = logging.getLogger(__name__)
+
 SCHEDULE_STATE_TYPE = "taskiq.schedules"
 
 
@@ -111,9 +113,7 @@ class MatrixRoomScheduleSource(ScheduleSource):
         broker_tasks = self.broker.get_all_tasks()
         for task in schedule_state:
             if task["name"] not in broker_tasks.keys():
-                self.broker.logger.log(
-                    f'Got schedule for non-existant task: {task["name"]}', "error"
-                )
+                logger.error(f'Got schedule for non-existant task: {task["name"]}')
                 raise Exception("Got schedule for non-existant task: {}".format(task["name"]))
             if broker_tasks[task["name"]].broker != self.broker:
                 continue
@@ -135,7 +135,7 @@ class MatrixRoomScheduleSource(ScheduleSource):
                     time=task.get("time"),
                 ),
             )
-        self.broker.logger.log(f"Returning schedules: {schedules}", "debug")
+        logger.debug(f"Returning schedules: {schedules}")
         return schedules
 
     async def get_schedules_from_room(self) -> List[Dict[str, Any]]:
@@ -147,13 +147,10 @@ class MatrixRoomScheduleSource(ScheduleSource):
         )
         if isinstance(resp, RoomGetStateEventError):
             if resp.status_code == "M_NOT_FOUND":
-                self.broker.logger.log(
-                    f"No schedules found for room {self.broker.room_id}", "info"
-                )
+                logger.info(f"No schedules found for room {self.broker.room_id}")
             else:
-                self.broker.logger.log(
-                    f"Encountered error when fetching schedules from room {self.broker.room_id}: {resp}",
-                    "error",
+                logger.warn(
+                    f"Encountered error when fetching schedules from room {self.broker.room_id}: {resp}"
                 )
             return []
         else:
