@@ -26,7 +26,6 @@ jobs:
       # IMPORTANT: this permission is mandatory for trusted publishing
       id-token: write
     steps:
-    steps:
       - name: Checkout repository
         uses: actions/checkout@v2
 
