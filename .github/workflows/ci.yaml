@@ -6,18 +6,18 @@ on:
       - '**' # This will run the workflow on every push to any branch
 
 jobs:
-  # build_and_test:
-  #   runs-on: ubuntu-latest
+  build_and_test:
+    runs-on: ubuntu-latest
 
-  #   steps:
-  #   - name: Checkout repository
-  #     uses: actions/checkout@v2
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
 
-  #   - name: Run tests
-  #     run: make test-ci
+    - name: Run tests
+      run: make test-ci
 
   pypi-publish:
-    if: github.ref == 'refs/heads/ci-test'
+    if: github.ref == 'refs/heads/main'
     name: upload release to PyPI
     runs-on: ubuntu-latest
     # Specifying a GitHub environment is optional, but strongly encouraged
