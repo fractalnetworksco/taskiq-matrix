@@ -6,12 +6,26 @@ on:
       - '**' # This will run the workflow on every push to any branch
 
 jobs:
-  build_and_test:
+  # build_and_test:
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #   - name: Checkout repository
+  #     uses: actions/checkout@v2
+
+  #   - name: Run tests
+  #     run: make test-ci
+
+  pypi-publish:
+    if: github.ref == 'refs/heads/ci-test'
+    name: upload release to PyPI
     runs-on: ubuntu-latest
-
+    # Specifying a GitHub environment is optional, but strongly encouraged
+    environment: release
+    permissions:
+      # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
 
-    - name: Run tests
-      run: make test-ci
