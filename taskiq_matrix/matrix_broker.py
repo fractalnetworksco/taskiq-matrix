@@ -248,26 +248,28 @@ class MatrixBroker(AsyncBroker):
         """
         Kicks a task into the broker.
         """
-        # populate next batch on the result backend client to avoid result delay
-        if (
-            isinstance(self.result_backend, MatrixResultBackend)
-            and not self.result_backend.matrix_client.next_batch
-        ):
-            since_token = await self.result_backend.matrix_client.get_latest_sync_token()
-            self.result_backend.matrix_client.next_batch = since_token
-
         queue_name = message.labels.get("queue", "mutex")
         device_name = message.labels.get("device")
         queue: MatrixQueue = (
             self.device_queue if device_name else getattr(self, f"{queue_name}_queue")
         )
+        room_id = message.labels.get("room_id", queue.room_id)
+        # populate next batch on the result backend client to avoid result delay
+        if (
+            isinstance(self.result_backend, MatrixResultBackend)
+            and not self.result_backend.matrix_client.next_batch
+        ):
+            since_token = await self.result_backend.matrix_client.get_latest_sync_token(
+                room_id=room_id
+            )
+            self.result_backend.matrix_client.next_batch = since_token
+
         # use a fresh new client here because kicking a task can sometimes be from
         # an ephemeral event loop
         client = FractalAsyncClient(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
         )
-        room_id = message.labels.get("room_id", queue.room_id)
 
         if queue == self.device_queue:
             if not device_name:
