@@ -96,7 +96,15 @@ class Checkpoint:
         self.client = client
         self.since_token = since_token
 
-    async def get_or_init_checkpoint(self) -> Optional[str]:
+        # initialize checkpoint
+        # loop = asyncio.new_event_loop()
+        # https://stackoverflow.com/questions/46827007/runtimeerror-this-event-loop-is-already-running-in-python/56434301#56434301
+        # nest_asyncio.apply()
+        # FIXME: This breaks pytest-asyncio tests (POSSIBLY?)
+        # self.task = loop.create_task(self.get_or_init_checkpoint())
+        # loop.run_until_complete(self.get_or_init_checkpoint())
+
+    async def get_or_init_checkpoint(self, full_sync: bool = False) -> Optional[str]:
         """
         Gets the current checkpoint from the Matrix server. If it doesn't exist,
         it will be initialized.
@@ -113,11 +121,13 @@ class Checkpoint:
             logger.debug(f"No checkpoint found for type: {self.type}")
 
             # fetch latest sync token
+            # if full_sync is false, then we fetch the latest sync token
+            # if full_sync is true, then we get a sync token from the beginning of the room's timeline
             res = await self.client.room_messages(
                 self.room_id,
                 start="",
                 limit=1,
-                direction=MessageDirection.back,
+                direction=MessageDirection.back if not full_sync else MessageDirection.front,
             )
             if not isinstance(res, RoomMessagesResponse):
                 raise CheckpointGetOrInitError(self.type)

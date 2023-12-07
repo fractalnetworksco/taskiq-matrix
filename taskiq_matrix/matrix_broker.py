@@ -70,16 +70,22 @@ class MatrixBroker(AsyncBroker):
         try:
             os.environ["MATRIX_HOMESERVER_URL"]
             os.environ["MATRIX_ACCESS_TOKEN"]
-            self.room_id = room_id or os.environ["MATRIX_ROOM_ID"]
+            self.room_id = room_id
         except KeyError as e:
             raise KeyError(f"Missing required environment variable: {e}")
 
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
-        self.mutex_queue = MatrixQueue("mutex", room_id=self.room_id)
-        self.device_queue = MatrixQueue(f"device.{self.device_name}", room_id=self.room_id)
-        self.broadcast_queue = BroadcastQueue("broadcast", room_id=self.room_id)
-        self.replication_queue = ReplicatedQueue("replication", room_id=self.room_id)
         self.worker_id = uuid4().hex
+
+    def _init_queues(self, room_id: Optional[str] = None):
+        if not room_id:
+            room_id = self.room_id or os.environ["MATRIX_ROOM_ID"]
+
+        if not hasattr(self, "mutex_queue"):
+            self.mutex_queue = MatrixQueue("mutex", room_id=room_id)
+            self.device_queue = MatrixQueue(f"device.{self.device_name}", room_id=room_id)
+            self.broadcast_queue = BroadcastQueue("broadcast", room_id=room_id)
+            self.replication_queue = ReplicatedQueue("replication", room_id=room_id)
 
     def with_result_backend(self, result_backend: AsyncResultBackend[_T]) -> Self:
         if not isinstance(result_backend, MatrixResultBackend):
@@ -193,11 +199,16 @@ class MatrixBroker(AsyncBroker):
         logger.info("Starting Taskiq Matrix Broker")
         await super().startup()
 
+        self._init_queues()
+
         # create and initialize queues
         await self.device_queue.checkpoint.get_or_init_checkpoint()
         await self.broadcast_queue.checkpoint.get_or_init_checkpoint()
         await self.mutex_queue.checkpoint.get_or_init_checkpoint()
-        await self.replication_queue.checkpoint.get_or_init_checkpoint()
+        # full sync is required for replication queue because it needs to
+        # sync any tasks that were sent before the checkpoint was created for
+        # this device
+        await self.replication_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
 
         # ensure that checkpoint schedule task is added to schedules
         await self.add_mutex_checkpoint_task()
@@ -251,12 +262,19 @@ class MatrixBroker(AsyncBroker):
         """
         Kicks a task into the broker.
         """
+
+        room_id = message.labels.get("room_id")
+
+        self._init_queues(room_id=room_id)
+
         queue_name = message.labels.get("queue", "mutex")
         device_name = message.labels.get("device")
         queue: MatrixQueue = (
             self.device_queue if device_name else getattr(self, f"{queue_name}_queue")
         )
-        room_id = message.labels.get("room_id", queue.room_id)
+        if not room_id:
+            room_id = queue.room_id
+
         # populate next batch on the result backend client to avoid result delay
         if (
             isinstance(self.result_backend, MatrixResultBackend)

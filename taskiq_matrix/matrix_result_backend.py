@@ -39,9 +39,9 @@ class MatrixResultBackend(AsyncResultBackend):
         self.matrix_client = FractalAsyncClient(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
-            room_id=os.environ["MATRIX_ROOM_ID"],
+            room_id=os.environ.get("MATRIX_ROOM_ID"),
         )
-        self.room = os.environ["MATRIX_ROOM_ID"]
+        self.room = os.environ.get("MATRIX_ROOM_ID")
         self.result_ex_time = result_ex_time
         self.result_px_time = result_px_time
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
