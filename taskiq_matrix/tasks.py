@@ -5,7 +5,7 @@ from nio import RoomContextError
 from .exceptions import QueueDoesNotExist
 from .filters import create_filter, get_first_unacked_task, run_sync_filter
 from .instance import broker
-from .matrix_queue import MatrixQueue
+from .matrix_queue import MatrixQueue, ReplicatedQueue
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +26,16 @@ async def update_checkpoint(queue_name: str) -> bool:
     Returns:
         True if checkpoint was successfully updated, False otherwise.
     """
+    broker._init_queues()
     try:
         queue: MatrixQueue = getattr(broker, f"{queue_name}_queue")
     except AttributeError:
         raise QueueDoesNotExist(f"Queue {queue_name} does not exist")
 
-    current_since_token = await queue.checkpoint.get_or_init_checkpoint()
+    if isinstance(queue, ReplicatedQueue):
+        current_since_token = await queue.checkpoint.get_or_init_checkpoint(full_sync=True)
+    else:
+        current_since_token = await queue.checkpoint.get_or_init_checkpoint(full_sync=False)
 
     logger.info(f"Running scheduled task update_checkpoint for queue: {queue.name}")
 
