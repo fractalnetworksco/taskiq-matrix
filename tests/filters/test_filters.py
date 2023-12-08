@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from fractal import FractalAsyncClient
+from fractal.matrix import FractalAsyncClient
 from nio import SyncError, SyncResponse, UnknownEvent
 from taskiq_matrix.filters import (
     create_filter,
@@ -134,7 +134,7 @@ async def test_filters_run_sync_filter_true_content_only():
     """
     Test that setting content_only to True returns a dictionary of rooms
     with a list of what was the value associated with the 'content' key of the
-    events
+    events and the sender of the event
     """
 
     # create a mock FractalAsyncClient object and mock its sync function
@@ -151,20 +151,20 @@ async def test_filters_run_sync_filter_true_content_only():
         "room2": MagicMock(),
     }
 
-    # create a dictionary of mock event objects and assign them a room
+    # create a dictionary of event objects and assign them a room
     mock_client.sync.return_value.rooms.join["room1"].timeline.events = [
         UnknownEvent(
-            source={"event_id": "abcd", "origin_server_ts": "hi", "sender": "sender1"},
+            source={"event_id": "abcd", "origin_server_ts": "hi", "sender": "sender1", "content": {"body": "event1"}},
             type="org.homeserver.database",
         ),
         UnknownEvent(
-            source={"event_id": "abcd", "origin_server_ts": "hi", "sender": "sender2"},
+            source={"event_id": "abcd", "origin_server_ts": "hi", "sender": "sender2", "content": {"body": "event2"}},
             type="org.homeserver.database",
         ),
     ]
     mock_client.sync.return_value.rooms.join["room2"].timeline.events = [
         UnknownEvent(
-            source={"event_id": "abcd", "origin_server_ts": "hi", "sender": "sender3"},
+            source={"event_id": "abcd", "origin_server_ts": "hi", "sender": "sender3", "content": {"body": "event3"}},
             type="org.homeserver.database",
         ),
     ]
@@ -180,8 +180,8 @@ async def test_filters_run_sync_filter_true_content_only():
 
     # assert the structure of the result
     assert result == {
-        "room1": ["event1", "event2"],
-        "room2": ["event3"],
+        "room1": [{"body": "event1", "sender": "sender1"}, {"body": "event2", "sender": "sender2"}],
+        "room2": [{"body": "event3", "sender": "sender3"}],
     }
 
 

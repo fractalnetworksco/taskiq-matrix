@@ -4,7 +4,7 @@ import os
 from typing import Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
-from fractal import FractalAsyncClient
+from fractal.matrix import FractalAsyncClient
 
 import pytest
 from nio import RoomCreateError, RoomGetStateEventResponse
