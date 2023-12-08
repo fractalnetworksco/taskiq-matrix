@@ -1,23 +1,26 @@
 import json
+import logging
 import os
 import socket
 from functools import partial
 from typing import Dict, List, Optional, Tuple
 
-from fractal import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
     MessageDirection,
     RoomGetStateEventError,
     RoomMessagesResponse,
     RoomPutStateError,
+    WhoamiError,
 )
 from taskiq import AckableMessage
 
 from .exceptions import CheckpointGetOrInitError, LockAcquireError, TaskAlreadyAcked
 from .filters import create_filter, run_sync_filter
 from .lock import MatrixLock
-from .log import Logger
 from .utils import send_message
+
+logger = logging.getLogger(__name__)
 
 
 class TaskTypes:
@@ -49,6 +52,7 @@ class Task:
     type: str
     data: str
     queue: str
+    sender: str
 
     def __init__(self, *args, **event):
         # FIXME: if event is malformed this will fail resulting in
@@ -57,6 +61,7 @@ class Task:
         self.type = event["msgtype"]
         self.data = json.loads(event["body"]["task"])
         self.queue = event["body"]["queue"]
+        self.sender = event["sender"]
 
     def __repr__(
         self,
@@ -78,7 +83,6 @@ class Checkpoint:
     room_id: str
     client: FractalAsyncClient
     since_token: Optional[str] = None
-    logger: Logger = Logger()
 
     def __init__(
         self,
@@ -86,13 +90,11 @@ class Checkpoint:
         room_id: str,
         client: FractalAsyncClient,
         since_token: Optional[str] = None,
-        logger: Logger = Logger(),
     ):
         self.type = type
         self.room_id = room_id
         self.client = client
         self.since_token = since_token
-        self.logger = logger
 
         # initialize checkpoint
         # loop = asyncio.new_event_loop()
@@ -116,7 +118,7 @@ class Checkpoint:
                 raise Exception(resp.message)
 
             # checkpoint state wasn't found, so initialize it
-            self.logger.log(f"No checkpoint found for type: {self.type}", "debug")
+            logger.debug(f"No checkpoint found for type: {self.type}")
 
             # fetch latest sync token
             res = await self.client.room_messages(
@@ -147,7 +149,7 @@ class Checkpoint:
         # acquire lock on checkpoint
         try:
             async with MatrixLock().lock(key=self.type):
-                self.logger.log(f"Setting checkpoint for type {self.type}", "debug")
+                logger.debug(f"Setting checkpoint for type {self.type}")
                 # set checkpoint
                 resp = await self.client.room_put_state(
                     self.room_id,
@@ -155,16 +157,14 @@ class Checkpoint:
                     {"checkpoint": since_token},
                 )
                 if isinstance(resp, RoomPutStateError):
-                    self.logger.log(
-                        f"Failed to set checkpoint for type {self.type}: {resp}", "error"
-                    )
+                    logger.error(f"Failed to set checkpoint for type {self.type}: {resp}")
                     return False
                 else:
                     self.since_token = since_token
                     return True
 
         except LockAcquireError as e:
-            self.logger.log(f"Failed to set checkpoint: {e}\n", "debug")
+            logger.debug(f"Failed to set checkpoint: {e}\n")
             return False
 
     @classmethod
@@ -188,7 +188,6 @@ class MatrixQueue:
     client: FractalAsyncClient
     checkpoint: Checkpoint
     task_types: TaskTypes
-    logger: Logger = Logger()
 
     def __init__(
         self,
@@ -244,8 +243,10 @@ class MatrixQueue:
             A list of tasks and acks.
         """
         next_batch = since_token or self.checkpoint.since_token
+
         task_filter = create_filter(
-            self.room_id, types=[self.task_types.task, f"{self.task_types.ack}.*"]
+            self.room_id,
+            types=[self.task_types.task, f"{self.task_types.ack}.*"],
         )
         task_events = await run_sync_filter(
             self.client, task_filter, timeout=timeout, since=next_batch
@@ -253,9 +254,16 @@ class MatrixQueue:
         tasks = [Task(**task) for task in task_events.get(self.room_id, [])]
         return tasks
 
-    def filter_acked_tasks(self, tasks: list["Task"]) -> list["Task"]:
+    def filter_acked_tasks(self, tasks: list["Task"], exclude_self: bool = False) -> list["Task"]:
         """
         Filter out all events that have been acked
+
+        Args:
+            tasks (list[Task]): The tasks to filter.
+            exclude_self (bool): Whether to exclude tasks that were sent by us.
+
+        Returns:
+            A list of unacked tasks.
         """
         task_dict: Dict[str, Task] = {}
         for task in tasks:
@@ -268,11 +276,23 @@ class MatrixQueue:
                 task_dict[task.id] = task
 
         # filter tasks that were not acknowledged and return them
-        unacked = [task for task in task_dict.values() if not task.acknowledged]
-        self.logger.log(f"{self.name} Unacked tasks: {unacked}", "info")
+        unacked = []
+        for task in task_dict.values():
+            if not task.acknowledged:
+                # if exclude_self is False, then append any unacked task
+                if not exclude_self:
+                    unacked.append(task)
+                # if exclude_self is True, then filter out tasks that were sent by us
+                # since we don't want to run tasks that we sent
+                elif task.sender != self.client.user_id:
+                    unacked.append(task)
+
+        logger.debug(f"{self.name} Unacked tasks: {unacked}")
         return unacked
 
-    async def get_unacked_tasks(self, timeout: int = 30000) -> Tuple[str, List[Task]]:
+    async def get_unacked_tasks(
+        self, timeout: int = 30000, exclude_self: bool = False
+    ) -> Tuple[str, List[Task]]:
         """
         Args:
             timeout (int): The timeout to use when fetching tasks.
@@ -285,8 +305,16 @@ class MatrixQueue:
         task ids. This should result in only tasks that dont have acks, and
         should be more efficient since the filtering happens serverside.
         """
+        # ensure that the client has a user id. This is necessary when exclude_self
+        # is True since we need to know the client's user id to filter out tasks
+        # that were sent by us.
+        if not self.client.user_id:
+            whoami = await self.client.whoami()
+            if isinstance(whoami, WhoamiError):
+                raise Exception(whoami.message)
+
         tasks = await self.get_tasks(timeout=timeout, since_token=self.checkpoint.since_token)
-        unacked = self.filter_acked_tasks(tasks)
+        unacked = self.filter_acked_tasks(tasks, exclude_self=exclude_self)
         return self.name, unacked
 
     async def all_tasks_acked(self) -> bool:
@@ -323,6 +351,9 @@ class MatrixQueue:
                 "task": "{}",
             }
         )
+        logger.debug(
+            f"Sending ack for task {task_id} to room: {self.room_id}\nAck type: {self.task_types.ack}.{task_id}",
+        )
         await send_message(
             self.client,
             self.room_id,
@@ -357,9 +388,8 @@ class MatrixQueue:
             # encode task data
             task_data = json.dumps(task.data).encode("utf-8")
 
-            self.logger.log(
+            logger.info(
                 f"Yielding message {task.data} for task {task.id} to worker {self.device_name}",
-                "info",
             )
             return AckableMessage(
                 data=task_data,

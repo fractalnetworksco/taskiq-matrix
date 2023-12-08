@@ -1,10 +1,11 @@
+import logging
 import os
 import pickle
 import socket
 from base64 import b64decode, b64encode
 from typing import Dict, Optional, TypeVar, Union
 
-from fractal import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import MessageDirection, RoomMessagesError
 from taskiq import AsyncResultBackend
 from taskiq.result import TaskiqResult
@@ -15,10 +16,12 @@ from .exceptions import (
     ResultDecodeError,
 )
 from .filters import create_filter, run_sync_filter
-from .log import Logger
 from .utils import send_message
 
 _ReturnType = TypeVar("_ReturnType")
+
+
+logger = logging.getLogger(__name__)
 
 
 class MatrixResultBackend(AsyncResultBackend):
@@ -39,7 +42,6 @@ class MatrixResultBackend(AsyncResultBackend):
             room_id=os.environ["MATRIX_ROOM_ID"],
         )
         self.room = os.environ["MATRIX_ROOM_ID"]
-        self.logger = Logger()
         self.result_ex_time = result_ex_time
         self.result_px_time = result_px_time
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
@@ -150,19 +152,19 @@ class MatrixResultBackend(AsyncResultBackend):
         try:
             result = result_object[self.room][0]
         except Exception as e:
-            self.logger.log(f"Error getting task result from Matrix {e}", "error")
+            logger.error(f"Error getting task result from Matrix {e}")
             raise ResultDecodeError()
 
         try:
             result = b64decode(result["body"]["task"]["value"])
         except Exception as e:
-            self.logger.log(f"Error loading result from returned task {e}", "error")
+            logger.error(f"Error loading result from returned task {e}")
             raise ResultDecodeError()
 
         try:
             taskiq_result: TaskiqResult[_ReturnType] = pickle.loads(result)
         except Exception as e:
-            self.logger.log(f"Error loading result as taskiq result: {e}", "error")
+            logger.error(f"Error loading result as taskiq result: {e}")
             raise ResultDecodeError()
 
         if not with_logs:

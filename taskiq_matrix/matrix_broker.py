@@ -7,6 +7,7 @@ import socket
 from typing import Any, AsyncGenerator, List, Optional, Self, TypeVar
 from uuid import uuid4
 
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import RoomGetStateEventError, RoomPutStateError
 from taskiq import AckableMessage, AsyncBroker, AsyncResultBackend, BrokerMessage
 
@@ -17,7 +18,6 @@ from .exceptions import (
 )
 from .filters import EMPTY_FILTER, run_sync_filter
 from .lock import MatrixLock
-from .log import Logger
 from .matrix_queue import BroadcastQueue, MatrixQueue, ReplicatedQueue, Task
 from .matrix_result_backend import MatrixResultBackend
 from .schedulesource import SCHEDULE_STATE_TYPE
@@ -41,11 +41,12 @@ class MatrixBroker(AsyncBroker):
         self,
         result_backend: Optional[AsyncResultBackend] = None,
         task_id_generator: Any = None,
+        room_id: Optional[str] = None,
     ) -> None:
         """
         A taskiq broker backed by the Matrix protocol.
 
-        A MatrixBroker is comprised of three independent task queues:
+        A MatrixBroker is comprised of four independent task queues:
 
         - device_queue: a device's independent queue of tasks that are
         to be executed by only that device
@@ -53,11 +54,11 @@ class MatrixBroker(AsyncBroker):
         by all devices in a room (group)
         - mutex_queue: a queue of tasks that should be run by any (only one)
         device in a group
-
+        - replication_queue: a queue of tasks that should be run by each device
         Requires the following environment variables to be set:
         - MATRIX_HOMESERVER_URL
         - MATRIX_ACCESS_TOKEN
-        - MATRIX_ROOM_ID
+        - MATRIX_ROOM_ID (if room_id not provided as an argument)
 
         NOTE: Rate limiting for the configured user should be disabled:
         `insert into ratelimit_override values ("@mjolnir:my-homeserver.chat", 0, 0);`
@@ -69,7 +70,7 @@ class MatrixBroker(AsyncBroker):
         try:
             os.environ["MATRIX_HOMESERVER_URL"]
             os.environ["MATRIX_ACCESS_TOKEN"]
-            self.room_id = os.environ["MATRIX_ROOM_ID"]
+            self.room_id = room_id or os.environ["MATRIX_ROOM_ID"]
         except KeyError as e:
             raise KeyError(f"Missing required environment variable: {e}")
 
@@ -79,7 +80,6 @@ class MatrixBroker(AsyncBroker):
         self.broadcast_queue = BroadcastQueue("broadcast", room_id=self.room_id)
         self.replication_queue = ReplicatedQueue("replication", room_id=self.room_id)
         self.worker_id = uuid4().hex
-        self.logger = Logger()
 
     def with_result_backend(self, result_backend: AsyncResultBackend[_T]) -> Self:
         if not isinstance(result_backend, MatrixResultBackend):
@@ -111,7 +111,7 @@ class MatrixBroker(AsyncBroker):
             if schedules.status_code != "M_NOT_FOUND":
                 raise Exception(schedules.message)
 
-            self.logger.log(
+            logger.info(
                 f"No schedules found for room {self.mutex_queue.room_id}, will attempt to add checkpoint task",
                 "info",
             )
@@ -126,37 +126,34 @@ class MatrixBroker(AsyncBroker):
         elif task not in schedules.content["tasks"]:
             # there were already scheduled tasks in the room but the checkpoint
             # task was not found in the list of tasks, so add it
-            self.logger.log(
+            logger.debug(
                 f"Checkpoint task not found in {self.mutex_queue.room_id} schedules, adding it",
-                "info",
             )
             schedules.content["tasks"].append(task)
             content = schedules.content
 
         else:
-            self.logger.log(
-                f"Checkpoint task already exists in {self.mutex_queue.room_id} schedules", "info"
+            logger.debug(
+                f"Checkpoint task already exists in {self.mutex_queue.room_id} schedules"
             )
             return True
 
         # update schedule state to include checkpoint task
         try:
             async with MatrixLock().lock(SCHEDULE_STATE_TYPE):
-                self.logger.log(
-                    f"Adding checkpoint task to {self.mutex_queue.room_id} schedules", "info"
-                )
+                logger.info(f"Adding checkpoint task to {self.mutex_queue.room_id} schedules")
                 res = await self.mutex_queue.client.room_put_state(
                     self.mutex_queue.room_id,
                     SCHEDULE_STATE_TYPE,
                     content,
                 )
                 if isinstance(res, RoomPutStateError):
-                    self.logger.log(f"Failed to add checkpoint task: {res}", "error")
+                    logger.error(f"Failed to add checkpoint task: {res}")
                     return False
                 else:
                     return True
         except LockAcquireError as e:
-            self.logger.log(f"{e}\n\n")
+            logger.error(f"{e}\n\n")
             return False
 
     async def update_device_checkpoints(self, interval: int = 60):
@@ -182,7 +179,7 @@ class MatrixBroker(AsyncBroker):
                     update_checkpoint("replication"),
                 )
             except Exception as err:
-                self.logger.log(f"Encountered error in update_device_checkpoint: {err}", "error")
+                logger.warn(f"update_device_checkpoints: {err}")
 
             await asyncio.sleep(interval)
 
@@ -193,7 +190,7 @@ class MatrixBroker(AsyncBroker):
 
         Will exit if the initial sync fails or the provided room is not found.
         """
-        self.logger.log("Starting up broker", "info")
+        logger.info("Starting Taskiq Matrix Broker")
         await super().startup()
 
         # create and initialize queues
@@ -214,7 +211,7 @@ class MatrixBroker(AsyncBroker):
         """
         Shuts down the broker.
         """
-        self.logger.log("Shutting down the broker", "info")
+        logger.info("Shutting down the broker")
         await self.device_queue.shutdown()
         await self.broadcast_queue.shutdown()
         await self.mutex_queue.shutdown()
@@ -251,17 +248,27 @@ class MatrixBroker(AsyncBroker):
         """
         Kicks a task into the broker.
         """
+        queue_name = message.labels.get("queue", "mutex")
+        device_name = message.labels.get("device")
+        queue: MatrixQueue = (
+            self.device_queue if device_name else getattr(self, f"{queue_name}_queue")
+        )
+        room_id = message.labels.get("room_id", queue.room_id)
         # populate next batch on the result backend client to avoid result delay
         if (
             isinstance(self.result_backend, MatrixResultBackend)
             and not self.result_backend.matrix_client.next_batch
         ):
-            await run_sync_filter(self.result_backend.matrix_client, EMPTY_FILTER, timeout=0)
+            since_token = await self.result_backend.matrix_client.get_latest_sync_token(
+                room_id=room_id
+            )
+            self.result_backend.matrix_client.next_batch = since_token
 
-        queue_name = message.labels.get("queue", "mutex")
-        device_name = message.labels.get("device")
-        queue: MatrixQueue = (
-            self.device_queue if device_name else getattr(self, f"{queue_name}_queue")
+        # use a fresh new client here because kicking a task can sometimes be from
+        # an ephemeral event loop
+        client = FractalAsyncClient(
+            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
+            access_token=os.environ["MATRIX_ACCESS_TOKEN"],
         )
 
         if queue == self.device_queue:
@@ -288,8 +295,8 @@ class MatrixBroker(AsyncBroker):
                     message = self._use_task_id(task_id, message)
                     message_body = message.message
                     await send_message(
-                        queue.client,
-                        queue.room_id,
+                        client,
+                        room_id,
                         message_body,
                         msgtype=msgtype,
                         task_id=message.task_id,
@@ -297,7 +304,7 @@ class MatrixBroker(AsyncBroker):
                     )
                 return None
             except LockAcquireError:
-                self.logger.log(f"Failed to acquire lock for schedule {task_id}", "info")
+                logger.info(f"Failed to acquire lock for schedule {task_id}")
                 return None
 
         if message.labels.get("task_id"):
@@ -306,14 +313,15 @@ class MatrixBroker(AsyncBroker):
             message_body = message.message.decode("utf-8")
 
         # regular task was kicked, simply send message into room
-        return await send_message(
-            queue.client,
-            queue.room_id,
+        await send_message(
+            client,
+            room_id,
             message_body,
             msgtype=msgtype,
             task_id=message.task_id,
             queue=queue_name,
         )
+        return await client.close()
 
     async def get_tasks(self) -> AsyncGenerator[List[Task], Any]:
         while True:
@@ -328,7 +336,8 @@ class MatrixBroker(AsyncBroker):
                     self.mutex_queue.get_unacked_tasks(), name=self.mutex_queue.name
                 ),
                 self.replication_queue.name: asyncio.create_task(
-                    self.replication_queue.get_unacked_tasks(), name=self.replication_queue.name
+                    self.replication_queue.get_unacked_tasks(exclude_self=True),
+                    name=self.replication_queue.name,
                 ),
             }
             sync_tasks = [
@@ -346,15 +355,15 @@ class MatrixBroker(AsyncBroker):
                     queue, pending_tasks = completed_task.result()
                     if pending_tasks:
                         sync_task_results.append(pending_tasks)
-                        self.logger.log(f"Got {len(pending_tasks)} tasks from {queue}", "debug")
+                        logger.debug(f"Got {len(pending_tasks)} tasks from {queue}")
                 except Exception as e:
-                    self.logger.log(f"Sync failed: {e}", "error")
+                    logger.error(f"Sync failed: {e}")
                     raise e
             for pending_task in pending:
                 if pending_task.done():
                     queue, pending_tasks = pending_task.result()
                     if pending_tasks:
-                        self.logger.log(f"Got {len(pending_tasks)} tasks from {queue}", "debug")
+                        logger.debug(f"Got {len(pending_tasks)} tasks from {queue}")
                         sync_task_results.append(pending_tasks)
                 else:
                     pending_task.cancel()
@@ -371,7 +380,7 @@ class MatrixBroker(AsyncBroker):
         """
         async for tasks in self.get_tasks():
             if not tasks:
-                self.logger.log(f"No tasks found for room: {self.room_id}")
+                logger.debug(f"No tasks found for room: {self.room_id}")
 
                 # Using the next batch from the client since the current checkpoint
                 # is likely returning tasks that all have acks. Since the checkpoint
@@ -401,8 +410,8 @@ class MatrixBroker(AsyncBroker):
                     yield await queue.yield_task(task)
                 except LockAcquireError as lock_err:
                     # if lock cannot be acquired, then another worker is already processing the task
-                    self.logger.log(str(lock_err))
+                    logger.error(str(lock_err))
                     continue
                 except Exception as e:
-                    self.logger.log(f"Error occurred while yielding task: {e}")
+                    logger.error(f"Error occurred while yielding task: {e}")
                     continue

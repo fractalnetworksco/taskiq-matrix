@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from fractal import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import SyncError
 
 EMPTY_FILTER = {
@@ -36,7 +36,11 @@ INVITE_FILTER = {
 
 
 def create_filter(
-    room_id: str, types: list = [], not_types: list = [], limit: Optional[int] = None
+    room_id: str,
+    types: list = [],
+    not_types: list = [],
+    limit: Optional[int] = None,
+    not_senders: list = [],
 ) -> Dict[str, Any]:
     """
     Create a filter for a room and/or specific message types.
@@ -51,7 +55,11 @@ def create_filter(
             "room": {
                 "rooms": [room_id],
                 "state": {"types": [], "limit": 0},
-                "timeline": {"types": [*types], "not_types": [*not_types]},
+                "timeline": {
+                    "types": [*types],
+                    "not_types": [*not_types],
+                    "not_senders": [*not_senders],
+                },
             },
             "request_id": str(uuid4()),
         }
@@ -62,7 +70,12 @@ def create_filter(
         "room": {
             "rooms": [room_id],
             "state": {"types": [], "limit": 0},
-            "timeline": {"types": [*types], "not_types": [*not_types], "limit": limit},
+            "timeline": {
+                "types": [*types],
+                "not_types": [*not_types],
+                "not_senders": [*not_senders],
+                "limit": limit,
+            },
         },
         "request_id": str(uuid4()),
     }
@@ -90,6 +103,12 @@ async def run_sync_filter(
     Execute a filter with the provided client, optionally filter message body by kwargs
     attempts to deserialize json
     """
+
+    def get_content_only(event):
+        content = event.source["content"]
+        content["sender"] = event.sender
+        return content
+
     if since is None:
         client.next_batch = None
 
@@ -102,7 +121,7 @@ async def run_sync_filter(
     d = {}
     for room in rooms:
         if content_only:
-            d[room] = [event.source["content"] for event in res.rooms.join[room].timeline.events]
+            d[room] = [get_content_only(event) for event in res.rooms.join[room].timeline.events]
         else:
             d[room] = [event.source for event in res.rooms.join[room].timeline.events]
 

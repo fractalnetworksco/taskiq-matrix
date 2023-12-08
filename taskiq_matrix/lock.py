@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 from uuid import uuid4
 
-from fractal import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
     MatrixRoom,
     MessageDirection,
@@ -19,6 +19,8 @@ from .exceptions import LockAcquireError
 from .filters import create_filter
 from .utils import setup_console_logging
 
+logger = logging.getLogger(__name__)
+
 
 class MatrixLock:
     """
@@ -26,7 +28,6 @@ class MatrixLock:
     Key/Value store.
     """
 
-    logger = logging.getLogger(__name__)
     next_batch = None
 
     def __init__(
@@ -101,7 +102,7 @@ class MatrixLock:
         if is_bytes:
             msgcontent["bytes"] = True
 
-        self.logger.debug(f"Sending message: {msgcontent} to room {room}")
+        logger.debug(f"Sending message: {msgcontent} to room {room}")
 
         try:
             response = await self.client.room_send(room, msgtype, msgcontent)
@@ -140,7 +141,7 @@ class MatrixLock:
         try:
             yield self.lock_id
         finally:
-            self.logger.info(f"Worker ({self.lock_id}) releasing lock: {key}")
+            logger.debug(f"Worker ({self.lock_id}) releasing lock: {key}")
             # update sync token before we release
             # await self.filter(self.create_filter(limit=0), timeout=0)
             # self.next_batch = self.client.next_batch
@@ -178,8 +179,8 @@ class MatrixLock:
             if res[self.room_id] and res[self.room_id][0]["lock_id"] == self.lock_id:
                 return True
             else:
-                self.logger.info(
-                    f'Someone else got the {key} lock: Worker {res[self.room_id][0]["lock_id"]}'
+                logger.info(
+                    f'Unable to acquire lock {key}, worker {res[self.room_id][0]["lock_id"]} got it.'
                 )
                 return False
         else:
@@ -192,8 +193,7 @@ class MatrixLock:
         execute a filter with the client, optionally filter message body by kwargs
         attempts to deserialize json
         """
-        # since = self.next_batch or since
-        self.logger.info("Next batch is %s" % self.next_batch)
+        logger.debug("Next batch is %s" % self.next_batch)
         res = await self.client.sync(timeout, sync_filter=filter, since=self.next_batch)
         if isinstance(res, SyncError):
             raise Exception(res.message)
