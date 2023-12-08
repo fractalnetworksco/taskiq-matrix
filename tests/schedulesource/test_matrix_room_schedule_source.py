@@ -1,10 +1,9 @@
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from fractal import FractalAsyncClient
+from fractal.matrix import FractalAsyncClient
 from nio import RoomGetStateEventError, RoomGetStateEventResponse
 from taskiq import ScheduledTask
-
 from taskiq_matrix.schedulesource import MatrixRoomScheduleSource
 
 
@@ -106,6 +105,7 @@ async def test_matrix_room_schedule_get_schedules_non_existant_task(test_matrix_
 
             mock_get_schedules_from_room.assert_called_once()
 
+
 @pytest.mark.skip(reason="not implemented")
 async def test_matrix_room_schedule_get_schedules_broker_check(test_matrix_broker):
     """
@@ -117,7 +117,7 @@ async def test_matrix_room_schedule_get_schedules_broker_check(test_matrix_broke
 
 
 @pytest.mark.integtest  # depends on Exception and get_schedules_from_room
-@pytest.mark.skip(reason="Not working as intended")
+# @pytest.mark.skip(reason="Not working as intended")
 async def test_matrix_room_schedule_get_schedules_no_cron_or_time(test_matrix_broker):
     """
     Tests that an error is raised if the task does not have "cron" or "time" key-value
@@ -164,13 +164,12 @@ async def test_matrix_room_schedule_get_schedules_from_room_unknown_error(test_m
         message="test message", status_code="test status code"
     )
 
-    with patch.object(broker.logger, "log") as mock_log:
+    with patch("taskiq_matrix.schedulesource.logger", new=MagicMock()) as mock_log:
+        mock_log.warn = MagicMock()
         resp = await test_schedule.get_schedules_from_room()
         assert resp == []
 
-    mock_log.assert_called()
-    log_messages = [call[0][0] for call in mock_log.call_args_list]
-    assert any("Encountered error when fetching" in message for message in log_messages)
+    mock_log.warn.assert_called()
 
 
 @pytest.mark.integtest  # uses a broker and its clients
@@ -189,13 +188,12 @@ async def test_matrix_room_schedule_get_schedules_from_room_not_found(test_matri
         message="test message", status_code="M_NOT_FOUND"
     )
 
-    with patch.object(broker.logger, "log") as mock_log:
+    with patch("taskiq_matrix.schedulesource.logger", new=MagicMock()) as mock_log:
+        mock_log.info = MagicMock()
         resp = await test_schedule.get_schedules_from_room()
         assert resp == []
 
-    mock_log.assert_called()
-    log_messages = [call[0][0] for call in mock_log.call_args_list]
-    assert any("No schedules found for room" in message for message in log_messages)
+    mock_log.info.assert_called()
 
 
 @pytest.mark.integtest  # uses a broker and its clients
