@@ -110,7 +110,7 @@ async def run_sync_filter(
         return content
 
     if since is None:
-        client.next_batch = None
+        client.next_batch = None # type:ignore
 
     res = await client.sync(timeout=timeout, sync_filter=filter, since=since)
     if isinstance(res, SyncError):
