@@ -461,37 +461,51 @@ async def test_matrix_lock_acquire_lock_not_acquired():
         mock_logger.info.assert_called_once()
 
 
-async def test_matrix_lock_filter_no_kwargs():
+async def test_matrix_lock_filter_no_kwargs(new_matrix_room):
     """ """
-    lock = MatrixLock()
+    room_id = await new_matrix_room()
 
+    lock = MatrixLock(room_id=room_id)
     lock_types = [f"fn.lock.acquire.None", f"fn.lock.release.None"]
     next = await lock.get_latest_sync_token()
+    print('next=====', next)
+    lock.client.next_batch = next
 
-    with patch("taskiq_matrix.lock.MatrixLock.next_batch", next):
-        res = await lock.filter(
-            lock.create_filter(types=lock_types), timeout=0, since=lock.next_batch
-        )
+    res = await lock.filter(
+        lock.create_filter(types=lock_types), timeout=0
+    )
+    print('no kwargs res=========', res)
 
     assert lock.room_id in res
 
+async def test_matrix_lock_new_test_delete_this(new_matrix_room):
+    """
+    """
+    room_id = await new_matrix_room()
+    lock = MatrixLock(room_id=room_id)
+    print('room id=====', lock.room_id)
+    print('lock id=======', lock.lock_id)
 
-async def test_matrix_lock_filter_with_kwargs():
+async def test_matrix_lock_filter_with_kwargs_non_meaningful(new_matrix_room):
     """ """
-    lock = MatrixLock()
+    room_id = await new_matrix_room()
+
+    lock = MatrixLock(room_id=room_id)
     lock_types = [f"fn.lock.acquire.None", f"fn.lock.release.None"]
     next = await lock.get_latest_sync_token()
+    print('next=====', next)
+    lock.client.next_batch = next
     additional_kwargs = {"test": "should return empty list"}
 
-    with patch("taskiq_matrix.lock.MatrixLock.next_batch", next):
-        res = await lock.filter(
-            lock.create_filter(types=lock_types),
-            timeout=0,
-            since=lock.next_batch,
-            **additional_kwargs,
-        )
-        assert res[lock.room_id] == []
+    res = await lock.filter(
+        lock.create_filter(types=lock_types),
+        timeout=0,
+        **additional_kwargs,
+    )
+    print('kwargs res=========', res)
+    assert res[lock.room_id] == []
 
+# ! add a test that uses meaningful kwargs
 
 async def test_matrix_lock_filter_syncerror():
     """ """
