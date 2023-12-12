@@ -168,27 +168,18 @@ async def test_matrix_broker_add_mutex_checkpoint_task_update_schedule(test_matr
     # create matrix broker object
     broker: MatrixBroker = await test_matrix_broker()
 
-    # mock the matrix broker's mutex queue and client
-    mock_mutex_queue = MagicMock()
-    mock_mutex_queue.client = AsyncMock()
-    broker.mutex_queue = mock_mutex_queue
-
     # create a dictionary with an empty "tasks" list
     event_content = {"tasks": []}
 
-    # set room_get_state_event to return a RoomGetStateEventResponse
-    mock_mutex_queue.client.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content=event_content, event_type="abc", state_key="abc", room_id="abc"
+    await broker.mutex_queue.client.room_put_state(
+        room_id=broker.mutex_queue.room_id,
+        event_type="taskiq.schedules",
+        content=event_content,
     )
 
-    # patch the room_put_state function call
-    with patch.object(broker.mutex_queue.client, "room_put_state") as mock_room_put_state:
-        # force room_put_state to return a RoomPutStateResponse
-        mock_room_put_state.return_value = RoomPutStateResponse(event_id="abc", room_id="abc")
-        result = await broker.add_mutex_checkpoint_task()
+    result = await broker.add_mutex_checkpoint_task()
 
-        assert result
-        mock_room_put_state.assert_called_once()
+    assert result
 
 
 @pytest.mark.integtest
@@ -201,17 +192,13 @@ async def test_matrix_broker_add_mutex_checkpoint_task_put_state_error(test_matr
     # create matrix broker object
     broker: MatrixBroker = await test_matrix_broker()
 
-    # mock the matrix broker's mutex queue and client
-    mock_mutex_queue = MagicMock()
-    mock_mutex_queue.client = AsyncMock()
-    broker.mutex_queue = mock_mutex_queue
-
     # create a dictionary with an empty "tasks" list
     event_content = {"tasks": []}
 
-    # set room_get_state_event to return a RoomGetStateEventResponse
-    mock_mutex_queue.client.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content=event_content, event_type="abc", state_key="abc", room_id="abc"
+    await broker.mutex_queue.client.room_put_state(
+        room_id=broker.mutex_queue.room_id,
+        event_type="taskiq.schedules",
+        content=event_content,
     )
 
     # patch the room_put_state function call

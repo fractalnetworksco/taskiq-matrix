@@ -15,7 +15,7 @@ jobs:
 
     - name: Run tests
       run: make test-ci
-  
+
   pypi-publish:
     needs: build_and_test
     if: github.ref == 'refs/heads/main'
@@ -33,14 +33,6 @@ jobs:
 
       - name: Install Poetry & Build
         run: pip install poetry; poetry build
-
-      - name: Bump version and commit
-        run: |
-          poetry version patch
-          git config --global user.name 'GitHub Action'
-          git config --global user.email 'action@users.noreply.github.com'
-          git commit -am "Bump version"
-          git push
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

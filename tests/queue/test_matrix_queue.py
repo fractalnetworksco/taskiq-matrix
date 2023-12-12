@@ -667,7 +667,7 @@ async def test_matrix_queue_yield_task_already_acked():
 
 
 @pytest.mark.integtest  # depends on Task
-async def test_matrix_queue_yield_task_not_acked():
+async def test_matrix_queue_yield_task_not_acked(new_matrix_room):
     """
     Tests that a yielded tast that has not been acknowledged will
     return an Ackablemessage object
@@ -687,8 +687,9 @@ async def test_matrix_queue_yield_task_not_acked():
     # create a Task object using the dictionary from above
     test_task = Task(**test_task_info)
 
+    room_id = await new_matrix_room()
     # create a MatrixQueue object
-    matrix_queue = MatrixQueue(name="test_matrix_queue")
+    matrix_queue = MatrixQueue(name="test_matrix_queue", room_id=room_id)
 
     # mock the matrix queue's task_is_acked() function to have it
     # return true

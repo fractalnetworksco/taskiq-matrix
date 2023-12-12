@@ -29,6 +29,7 @@ class MatrixResultBackend(AsyncResultBackend):
         self,
         result_ex_time: Optional[int] = None,
         result_px_time: Optional[int] = None,
+        room_id: Optional[str] = None,
     ):
         """
         Constructs a new Matrix result backend.
@@ -36,12 +37,12 @@ class MatrixResultBackend(AsyncResultBackend):
         :param result_ex_time: expire time in seconds for result.
         :param result_px_time: expire time in milliseconds for result.
         """
+        self.room = room_id or os.environ.get("MATRIX_ROOM_ID")
         self.matrix_client = FractalAsyncClient(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
-            room_id=os.environ["MATRIX_ROOM_ID"],
+            room_id=self.room,
         )
-        self.room = os.environ["MATRIX_ROOM_ID"]
         self.result_ex_time = result_ex_time
         self.result_px_time = result_px_time
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())

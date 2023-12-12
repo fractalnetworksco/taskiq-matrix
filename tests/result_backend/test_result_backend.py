@@ -17,7 +17,7 @@ from taskiq_matrix.matrix_result_backend import (
 @pytest.mark.skip(
     reason="The test below this is doing the same thing. So if that one works, then the result backend works"
 )
-async def test_result_backend_works():
+async def test_result_backend_works(new_matrix_room):
     """
     Ensure that only one instance of a lock can be acquired for a certain key.
     """
@@ -25,7 +25,8 @@ async def test_result_backend_works():
     task_id = str(uuid4())
 
     # create a MatrixResultBackend object
-    result_backend = MatrixResultBackend()
+    room_id = await new_matrix_room()
+    result_backend = MatrixResultBackend(room_id=room_id)
 
     # set a task
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
@@ -43,15 +44,19 @@ async def test_result_backend_works():
     await result_backend.shutdown()
 
 
-async def test_is_result_ready():
+async def test_is_result_ready(new_matrix_room):
     """
     Test if the result from MaxtrixResultBacken is available to the user
     """
     # create a task_id
     task_id = str(uuid4())
 
+    # patch environment to use the new room
+    room_id = await new_matrix_room()
+
     # create a MatrixResultBackend object
-    result_backend = MatrixResultBackend()
+    room_id = await new_matrix_room()
+    result_backend = MatrixResultBackend(room_id=room_id)
 
     # check if the result is ready before giving a task
     assert await result_backend.is_result_ready(task_id=task_id) == False
@@ -67,7 +72,7 @@ async def test_is_result_ready():
     await result_backend.shutdown()
 
 
-async def test_get_result_no_result():
+async def test_get_result_no_result(new_matrix_room):
     """
     Test error
     """
@@ -75,7 +80,8 @@ async def test_get_result_no_result():
     task_id = str(uuid4())
 
     # create a MatrixResultBackend object
-    result_backend = MatrixResultBackend()
+    room_id = await new_matrix_room()
+    result_backend = MatrixResultBackend(room_id=room_id)
 
     with pytest.raises(Exception):
         assert await result_backend.get_result(task_id=task_id, with_logs=False)
@@ -83,7 +89,7 @@ async def test_get_result_no_result():
     await result_backend.shutdown()
 
 
-async def test_get_result_decode_error():
+async def test_get_result_decode_error(new_matrix_room):
     """
     Test decode error exception by setting with_logs to false
     """
@@ -91,7 +97,8 @@ async def test_get_result_decode_error():
     task_id = str(uuid4())
 
     # create a MatrixResultBackend object
-    result_backend = MatrixResultBackend()
+    room_id = await new_matrix_room()
+    result_backend = MatrixResultBackend(room_id=room_id)
 
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
 
@@ -115,7 +122,7 @@ async def test_get_result_decode_error():
 @pytest.mark.skip(
     reason="Not finished. Verify that the ex time and px time are included in the message respectively"
 )
-async def test_set_result_ex_px():
+async def test_set_result_ex_px(new_matrix_room):
     """
     Test manually setting px_time and ex_time
     """
@@ -123,7 +130,8 @@ async def test_set_result_ex_px():
     task_id = str(uuid4())
 
     # create a MatrixResultBackend object
-    result_backend = MatrixResultBackend(result_ex_time=1)
+    room_id = await new_matrix_room()
+    result_backend = MatrixResultBackend(result_ex_time=1, room_id=room_id)
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
     await result_backend.set_result(task_id=task_id, result=result)
 

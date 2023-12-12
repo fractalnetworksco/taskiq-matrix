@@ -96,7 +96,7 @@ class Checkpoint:
         self.client = client
         self.since_token = since_token
 
-    async def get_or_init_checkpoint(self) -> Optional[str]:
+    async def get_or_init_checkpoint(self, full_sync: bool = False) -> Optional[str]:
         """
         Gets the current checkpoint from the Matrix server. If it doesn't exist,
         it will be initialized.
@@ -113,11 +113,13 @@ class Checkpoint:
             logger.debug(f"No checkpoint found for type: {self.type}")
 
             # fetch latest sync token
+            # if full_sync is false, then we fetch the latest sync token
+            # if full_sync is true, then we get a sync token from the beginning of the room's timeline
             res = await self.client.room_messages(
                 self.room_id,
                 start="",
                 limit=1,
-                direction=MessageDirection.back,
+                direction=MessageDirection.back if not full_sync else MessageDirection.front,
             )
             if not isinstance(res, RoomMessagesResponse):
                 raise CheckpointGetOrInitError(self.type)
@@ -140,7 +142,7 @@ class Checkpoint:
         """
         # acquire lock on checkpoint
         try:
-            async with MatrixLock().lock(key=self.type):
+            async with MatrixLock(room_id=self.room_id).lock(key=self.type):
                 logger.debug(f"Setting checkpoint for type {self.type}")
                 # set checkpoint
                 resp = await self.client.room_put_state(
@@ -156,7 +158,7 @@ class Checkpoint:
                     return True
 
         except LockAcquireError as e:
-            logger.debug(f"Failed to set checkpoint: {e}\n")
+            logger.info(f"Failed to set checkpoint: {e}\n")
             return False
 
     @classmethod
@@ -278,6 +280,8 @@ class MatrixQueue:
                 # since we don't want to run tasks that we sent
                 elif task.sender != self.client.user_id:
                     unacked.append(task)
+                else:
+                    logger.warning(f"Filtering out task {task.id} sent by {task.sender}")
 
         logger.debug(f"{self.name} Unacked tasks: {unacked}")
         return unacked
@@ -371,7 +375,7 @@ class MatrixQueue:
             LockAcquireError: If the lock could not be acquired.
             TaskAlreadyAcked: If the task has been acked since the lock was acquired.
         """
-        async with MatrixLock().lock(f"{self.task_types.lock}.{task.id}"):
+        async with MatrixLock(room_id=self.room_id).lock(f"{self.task_types.lock}.{task.id}"):
             # ensure that task has not been acked since lock was acquired
             acked = await self.task_is_acked(task.id)
             if acked:
