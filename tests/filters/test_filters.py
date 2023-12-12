@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from fractal import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import AsyncClient, SyncError, SyncResponse
 
 from taskiq_matrix.filters import create_filter, get_first_unacked_task, run_sync_filter
