@@ -96,14 +96,6 @@ class Checkpoint:
         self.client = client
         self.since_token = since_token
 
-        # initialize checkpoint
-        # loop = asyncio.new_event_loop()
-        # https://stackoverflow.com/questions/46827007/runtimeerror-this-event-loop-is-already-running-in-python/56434301#56434301
-        # nest_asyncio.apply()
-        # FIXME: This breaks pytest-asyncio tests (POSSIBLY?)
-        # self.task = loop.create_task(self.get_or_init_checkpoint())
-        # loop.run_until_complete(self.get_or_init_checkpoint())
-
     async def get_or_init_checkpoint(self, full_sync: bool = False) -> Optional[str]:
         """
         Gets the current checkpoint from the Matrix server. If it doesn't exist,
