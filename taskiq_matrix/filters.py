@@ -125,10 +125,6 @@ async def run_sync_filter(
         else:
             d[room] = [event.source for event in res.rooms.join[room].timeline.events]
 
-    if kwargs:
-        # filter out all keys by value from kwargs
-        for key in filter_keys:
-            d = {k: [i for i in v if i.get(key) == kwargs[key]] for k, v in d.items()}
     return d
 
 

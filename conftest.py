@@ -1,13 +1,14 @@
 import asyncio
 import json
 import os
-from typing import Awaitable, Callable, Generator
+from typing import Any, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse
+from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
+
 from taskiq_matrix.matrix_broker import (
     BroadcastQueue,
     MatrixBroker,
@@ -113,3 +114,23 @@ def test_checkpoint():
 @pytest.fixture
 def test_room_id() -> str:
     return TEST_ROOM_ID
+
+
+@pytest.fixture
+def unknown_event_factory() -> Callable[[str, str], UnknownEvent]:
+    """
+    Returns a mock Matrix event class.
+    """
+
+    def create_test_event(body: str, sender: str) -> UnknownEvent:
+        return UnknownEvent(
+            source={
+                "event_id": "test_event_id",
+                "sender": sender,
+                "origin_server_ts": 0,
+                "content": {"type": "test.event", "body": body},
+            },
+            type="test_event",
+        )
+
+    return create_test_event

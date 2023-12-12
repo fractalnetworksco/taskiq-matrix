@@ -72,6 +72,7 @@ async def test_matrix_queue_get_tasks_return_tasks():
                 "queue": "mutex",
             },
             "msgtype": "task",
+            "sender": "sender",
         },
         {
             "body": {
@@ -80,6 +81,7 @@ async def test_matrix_queue_get_tasks_return_tasks():
                 "queue": "mutex",
             },
             "msgtype": "task",
+            "sender": "sender",
         },
     ]
 
@@ -119,6 +121,7 @@ async def test_matrix_queue_filter_acked_tasks_proper_filter():
                 "queue": "mutex",
             },
             "msgtype": "test_matrix_queue",
+            "sender": "sender",
         },
         {
             "body": {
@@ -127,6 +130,7 @@ async def test_matrix_queue_filter_acked_tasks_proper_filter():
                 "queue": "mutex",
             },
             "msgtype": "test_matrix_queue.2",
+            "sender": "sender",
         },
     ]
 
@@ -587,6 +591,7 @@ async def test_matrix_queue_yield_task_lock_fail():
             "queue": "mutex",
         },
         "msgtype": "task",
+        "sender": "sender",
     }
 
     # create a Task object using the dictionary from above
@@ -622,6 +627,7 @@ async def test_matrix_queue_yield_task_already_acked():
             "queue": "mutex",
         },
         "msgtype": "task",
+        "sender": "sender",
     }
 
     # create a Task object using the dictionary from above
@@ -656,6 +662,7 @@ async def test_matrix_queue_yield_task_not_acked():
             "queue": "mutex",
         },
         "msgtype": "task",
+        "sender": "sender",
     }
 
     # create a Task object using the dictionary from above
