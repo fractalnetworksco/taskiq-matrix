@@ -17,6 +17,7 @@ jobs:
       run: make test-ci
   
   pypi-publish:
+    needs: build_and_test
     if: github.ref == 'refs/heads/main'
     name: upload release to PyPI
     runs-on: ubuntu-latest
