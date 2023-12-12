@@ -15,3 +15,22 @@ jobs:
 
     - name: Run tests
       run: make test-ci
+  
+  pypi-publish:
+    if: github.ref == 'refs/heads/main'
+    name: upload release to PyPI
+    runs-on: ubuntu-latest
+    # Specifying a GitHub environment is optional, but strongly encouraged
+    environment: release
+    permissions:
+      # IMPORTANT: this permission is mandatory for trusted publishing
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install Poetry & Build
+        run: pip install poetry; poetry build
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
