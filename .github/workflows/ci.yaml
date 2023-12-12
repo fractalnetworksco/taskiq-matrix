@@ -17,6 +17,7 @@ jobs:
       run: make test-ci
   
   pypi-publish:
+    needs: build_and_test
     if: github.ref == 'refs/heads/main'
     name: upload release to PyPI
     runs-on: ubuntu-latest
@@ -25,6 +26,7 @@ jobs:
     permissions:
       # IMPORTANT: this permission is mandatory for trusted publishing
       id-token: write
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -36,7 +38,7 @@ jobs:
         run: |
           poetry version patch
           git config --global user.name 'GitHub Action'
-          git config --global user.email 'ci@fractalnetworks.co'
+          git config --global user.email 'action@users.noreply.github.com'
           git commit -am "Bump version"
           git push
 
