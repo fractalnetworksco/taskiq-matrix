@@ -66,11 +66,8 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
         # set the broker's room id
         broker.room_id = room_id
 
-        # recreate the broker's queues using the new room id
-        broker.mutex_queue = MatrixQueue(broker.mutex_queue.name, room_id=room_id)
-        broker.device_queue = MatrixQueue(broker.device_queue.name, room_id=room_id)
-        broker.broadcast_queue = BroadcastQueue(broker.broadcast_queue.name, room_id=room_id)
-        broker.replication_queue = ReplicatedQueue(broker.replication_queue.name, room_id=room_id)
+        # use room_id for the queues
+        broker._init_queues(room_id=room_id)
 
         return broker
 
@@ -99,12 +96,12 @@ def test_broker_message():
 
 
 @pytest.fixture(scope="function")
-def test_checkpoint():
+def test_checkpoint(test_room_id) -> Checkpoint:
     mock_client_parameter = MagicMock(spec=AsyncClient)
     mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id="test room"
+        content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
     )
-    return Checkpoint(type="abc", room_id="abc", client=mock_client_parameter)
+    return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
 
 
 # FIXME: Add a Matrix result backend fixture. The fixture should look very similar

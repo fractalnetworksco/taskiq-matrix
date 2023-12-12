@@ -29,6 +29,7 @@ class MatrixResultBackend(AsyncResultBackend):
         self,
         result_ex_time: Optional[int] = None,
         result_px_time: Optional[int] = None,
+        room_id: Optional[str] = None,
     ):
         """
         Constructs a new Matrix result backend.
@@ -41,7 +42,7 @@ class MatrixResultBackend(AsyncResultBackend):
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
             room_id=os.environ.get("MATRIX_ROOM_ID"),
         )
-        self.room = os.environ.get("MATRIX_ROOM_ID")
+        self.room = room_id or os.environ.get("MATRIX_ROOM_ID")
         self.result_ex_time = result_ex_time
         self.result_px_time = result_px_time
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())

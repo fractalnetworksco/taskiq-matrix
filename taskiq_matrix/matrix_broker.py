@@ -146,7 +146,7 @@ class MatrixBroker(AsyncBroker):
 
         # update schedule state to include checkpoint task
         try:
-            async with MatrixLock().lock(SCHEDULE_STATE_TYPE):
+            async with MatrixLock(room_id=self.mutex_queue.room_id).lock(SCHEDULE_STATE_TYPE):
                 logger.info(f"Adding checkpoint task to {self.mutex_queue.room_id} schedules")
                 res = await self.mutex_queue.client.room_put_state(
                     self.mutex_queue.room_id,
@@ -310,7 +310,7 @@ class MatrixBroker(AsyncBroker):
                 raise ScheduledTaskRequiresTaskIdLabel(message.task_id)
 
             try:
-                async with MatrixLock().lock(f"{queue.task_types.task}.{task_id}"):
+                async with MatrixLock(room_id=room_id).lock(f"{queue.task_types.task}.{task_id}"):
                     # generate a new unique task id for the message
                     task_id = self.id_generator()
                     message = self._use_task_id(task_id, message)
