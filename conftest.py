@@ -1,13 +1,14 @@
 import asyncio
 import json
 import os
-from typing import Awaitable, Callable, Generator
+from typing import Any, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse
+from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
+
 from taskiq_matrix.matrix_broker import (
     BroadcastQueue,
     MatrixBroker,
@@ -43,7 +44,9 @@ def new_matrix_room(matrix_client: AsyncClient):
     async def create():
         res = await matrix_client.room_create(name="test_room")
         if isinstance(res, RoomCreateError):
+            await matrix_client.close()
             raise Exception("Failed to create test room")
+        await matrix_client.close()
         return res.room_id
 
     return create
@@ -63,11 +66,8 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
         # set the broker's room id
         broker.room_id = room_id
 
-        # recreate the broker's queues using the new room id
-        broker.mutex_queue = MatrixQueue(broker.mutex_queue.name, room_id=room_id)
-        broker.device_queue = MatrixQueue(broker.device_queue.name, room_id=room_id)
-        broker.broadcast_queue = BroadcastQueue(broker.broadcast_queue.name, room_id=room_id)
-        broker.replication_queue = ReplicatedQueue(broker.replication_queue.name, room_id=room_id)
+        # use room_id for the queues
+        broker._init_queues(room_id=room_id)
 
         return broker
 
@@ -96,12 +96,12 @@ def test_broker_message():
 
 
 @pytest.fixture(scope="function")
-def test_checkpoint():
+def test_checkpoint(test_room_id) -> Checkpoint:
     mock_client_parameter = MagicMock(spec=AsyncClient)
     mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id="test room"
+        content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
     )
-    return Checkpoint(type="abc", room_id="abc", client=mock_client_parameter)
+    return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
 
 
 # FIXME: Add a Matrix result backend fixture. The fixture should look very similar
@@ -113,3 +113,23 @@ def test_checkpoint():
 @pytest.fixture
 def test_room_id() -> str:
     return TEST_ROOM_ID
+
+
+@pytest.fixture
+def unknown_event_factory() -> Callable[[str, str], UnknownEvent]:
+    """
+    Returns a mock Matrix event class.
+    """
+
+    def create_test_event(body: str, sender: str) -> UnknownEvent:
+        return UnknownEvent(
+            source={
+                "event_id": "test_event_id",
+                "sender": sender,
+                "origin_server_ts": 0,
+                "content": {"type": "test.event", "body": body},
+            },
+            type="test_event",
+        )
+
+    return create_test_event

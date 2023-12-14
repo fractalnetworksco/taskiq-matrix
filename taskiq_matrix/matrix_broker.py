@@ -70,16 +70,22 @@ class MatrixBroker(AsyncBroker):
         try:
             os.environ["MATRIX_HOMESERVER_URL"]
             os.environ["MATRIX_ACCESS_TOKEN"]
-            self.room_id = room_id or os.environ["MATRIX_ROOM_ID"]
+            self.room_id = room_id
         except KeyError as e:
             raise KeyError(f"Missing required environment variable: {e}")
 
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
-        self.mutex_queue = MatrixQueue("mutex", room_id=self.room_id)
-        self.device_queue = MatrixQueue(f"device.{self.device_name}", room_id=self.room_id)
-        self.broadcast_queue = BroadcastQueue("broadcast", room_id=self.room_id)
-        self.replication_queue = ReplicatedQueue("replication", room_id=self.room_id)
         self.worker_id = uuid4().hex
+
+    def _init_queues(self, room_id: Optional[str] = None):
+        if not room_id:
+            room_id = self.room_id or os.environ["MATRIX_ROOM_ID"]
+
+        if not hasattr(self, "mutex_queue"):
+            self.mutex_queue = MatrixQueue("mutex", room_id=room_id)
+            self.device_queue = MatrixQueue(f"device.{self.device_name}", room_id=room_id)
+            self.broadcast_queue = BroadcastQueue("broadcast", room_id=room_id)
+            self.replication_queue = ReplicatedQueue("replication", room_id=room_id)
 
     def with_result_backend(self, result_backend: AsyncResultBackend[_T]) -> Self:
         if not isinstance(result_backend, MatrixResultBackend):
@@ -112,8 +118,8 @@ class MatrixBroker(AsyncBroker):
                 raise Exception(schedules.message)
 
             logger.info(
-                f"No schedules found for room {self.mutex_queue.room_id}, will attempt to add checkpoint task",
-                "info",
+                f"No schedules found for room %s, will attempt to add checkpoint task",
+                self.mutex_queue.room_id,
             )
             content = {"tasks": [task]}
 
@@ -140,7 +146,7 @@ class MatrixBroker(AsyncBroker):
 
         # update schedule state to include checkpoint task
         try:
-            async with MatrixLock().lock(SCHEDULE_STATE_TYPE):
+            async with MatrixLock(room_id=self.mutex_queue.room_id).lock(SCHEDULE_STATE_TYPE):
                 logger.info(f"Adding checkpoint task to {self.mutex_queue.room_id} schedules")
                 res = await self.mutex_queue.client.room_put_state(
                     self.mutex_queue.room_id,
@@ -156,13 +162,10 @@ class MatrixBroker(AsyncBroker):
             logger.error(f"{e}\n\n")
             return False
 
-    async def update_device_checkpoints(self, interval: int = 60):
+    async def update_checkpoints(self, interval: int = 60):
         """
-        Background task that periodically updates the device and broadcast
-        queue checkpoints.
-
-        Note: Figure out how to test block of code in infinite loop.
-            The infinite loop makes this currently untestable
+        Background task that periodically updates the device, broadcast,
+        and replication queue checkpoints.
 
         Args:
             interval (int): The interval in seconds to update the checkpoints.
@@ -170,18 +173,21 @@ class MatrixBroker(AsyncBroker):
         """
         from .tasks import update_checkpoint
 
-        while True:
-            try:
-                # run both updates in parallel
-                await asyncio.gather(
-                    update_checkpoint("device"),
-                    update_checkpoint("broadcast"),
-                    update_checkpoint("replication"),
-                )
-            except Exception as err:
-                logger.warn(f"update_device_checkpoints: {err}")
+        try:
+            while True:
+                try:
+                    # run both updates in parallel
+                    await asyncio.gather(
+                        update_checkpoint("device"),
+                        update_checkpoint("broadcast"),
+                        update_checkpoint("replication"),
+                    )
+                except Exception as err:
+                    logger.error("Encountered error in update_device_checkpoint: %s", err)
 
-            await asyncio.sleep(interval)
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            return None
 
     async def startup(self) -> None:
         """
@@ -193,17 +199,22 @@ class MatrixBroker(AsyncBroker):
         logger.info("Starting Taskiq Matrix Broker")
         await super().startup()
 
+        self._init_queues()
+
         # create and initialize queues
         await self.device_queue.checkpoint.get_or_init_checkpoint()
         await self.broadcast_queue.checkpoint.get_or_init_checkpoint()
         await self.mutex_queue.checkpoint.get_or_init_checkpoint()
-        await self.replication_queue.checkpoint.get_or_init_checkpoint()
+        # full sync is required for replication queue because it needs to
+        # sync any tasks that were sent before the checkpoint was created for
+        # this device
+        await self.replication_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
 
         # ensure that checkpoint schedule task is added to schedules
         await self.add_mutex_checkpoint_task()
 
-        # launch brackground task that updates device checkpoints
-        asyncio.create_task(self.update_device_checkpoints())
+        # launch background task that updates device checkpoints
+        self.checkpoint_updater = asyncio.create_task(self.update_checkpoints())
 
         return None
 
@@ -212,6 +223,9 @@ class MatrixBroker(AsyncBroker):
         Shuts down the broker.
         """
         logger.info("Shutting down the broker")
+        self.checkpoint_updater.cancel()
+        await self.checkpoint_updater
+
         await self.device_queue.shutdown()
         await self.broadcast_queue.shutdown()
         await self.mutex_queue.shutdown()
@@ -248,12 +262,19 @@ class MatrixBroker(AsyncBroker):
         """
         Kicks a task into the broker.
         """
+
+        room_id = message.labels.get("room_id")
+
+        self._init_queues(room_id=room_id)
+
         queue_name = message.labels.get("queue", "mutex")
         device_name = message.labels.get("device")
         queue: MatrixQueue = (
             self.device_queue if device_name else getattr(self, f"{queue_name}_queue")
         )
-        room_id = message.labels.get("room_id", queue.room_id)
+        if not room_id:
+            room_id = queue.room_id
+
         # populate next batch on the result backend client to avoid result delay
         if (
             isinstance(self.result_backend, MatrixResultBackend)
@@ -289,7 +310,7 @@ class MatrixBroker(AsyncBroker):
                 raise ScheduledTaskRequiresTaskIdLabel(message.task_id)
 
             try:
-                async with MatrixLock().lock(f"{queue.task_types.task}.{task_id}"):
+                async with MatrixLock(room_id=room_id).lock(f"{queue.task_types.task}.{task_id}"):
                     # generate a new unique task id for the message
                     task_id = self.id_generator()
                     message = self._use_task_id(task_id, message)

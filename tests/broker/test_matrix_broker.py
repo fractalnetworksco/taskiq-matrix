@@ -259,27 +259,18 @@ async def test_matrix_broker_add_mutex_checkpoint_task_update_schedule(test_matr
     # create matrix broker object
     broker: MatrixBroker = await test_matrix_broker()
 
-    # mock the matrix broker's mutex queue and client
-    mock_mutex_queue = MagicMock()
-    mock_mutex_queue.client = AsyncMock()
-    broker.mutex_queue = mock_mutex_queue
-
     # create a dictionary with an empty "tasks" list
     event_content = {"tasks": []}
 
-    # set room_get_state_event to return a RoomGetStateEventResponse
-    mock_mutex_queue.client.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content=event_content, event_type="abc", state_key="abc", room_id="abc"
+    await broker.mutex_queue.client.room_put_state(
+        room_id=broker.mutex_queue.room_id,
+        event_type="taskiq.schedules",
+        content=event_content,
     )
 
-    # patch the room_put_state function call
-    with patch.object(broker.mutex_queue.client, "room_put_state") as mock_room_put_state:
-        # force room_put_state to return a RoomPutStateResponse
-        mock_room_put_state.return_value = RoomPutStateResponse(event_id="abc", room_id="abc")
-        result = await broker.add_mutex_checkpoint_task()
+    result = await broker.add_mutex_checkpoint_task()
 
-        assert result
-        mock_room_put_state.assert_called_once()
+    assert result
 
 
 @pytest.mark.integtest
@@ -292,17 +283,13 @@ async def test_matrix_broker_add_mutex_checkpoint_task_put_state_error(test_matr
     # create matrix broker object
     broker: MatrixBroker = await test_matrix_broker()
 
-    # mock the matrix broker's mutex queue and client
-    mock_mutex_queue = MagicMock()
-    mock_mutex_queue.client = AsyncMock()
-    broker.mutex_queue = mock_mutex_queue
-
     # create a dictionary with an empty "tasks" list
     event_content = {"tasks": []}
 
-    # set room_get_state_event to return a RoomGetStateEventResponse
-    mock_mutex_queue.client.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content=event_content, event_type="abc", state_key="abc", room_id="abc"
+    await broker.mutex_queue.client.room_put_state(
+        room_id=broker.mutex_queue.room_id,
+        event_type="taskiq.schedules",
+        content=event_content,
     )
 
     # patch the room_put_state function call
@@ -356,9 +343,9 @@ async def test_matrix_broker_add_mutex_checkpoint_task_lock_fail(test_matrix_bro
 
 @pytest.mark.integtest
 @pytest.mark.skip(
-    reason="update_device_checkpoints is an infinite loop. need to figure out how to test infinite loop"
+    reason="update_checkpoints is an infinite loop. need to figure out how to test infinite loop"
 )
-async def test_matrix_broker_update_device_checkpoints(test_matrix_broker):
+async def test_matrix_broker_update_checkpoints(test_matrix_broker):
     """
     Stuck in a while True statement
     """
@@ -369,7 +356,7 @@ async def test_matrix_broker_update_device_checkpoints(test_matrix_broker):
     with patch(
         "taskiq_matrix.tasks.update_checkpoint", new=AsyncMock()
     ) as mock_update_checkpoint:
-        await matrix_broker.update_device_checkpoints(mock_interval)
+        await matrix_broker.update_checkpoints(mock_interval)
 
         mock_update_checkpoint.assert_has_calls([call("device"), call("broadcast")])
 
@@ -383,18 +370,23 @@ async def test_matrix_broker_shutdown_proper_shutdown(test_matrix_broker):
     # create MatrixBroker object
     matrix_broker: MatrixBroker = await test_matrix_broker()
 
+    await matrix_broker.startup()
+
     # close the broker's REAL queue clients
     await matrix_broker.device_queue.client.close()
     await matrix_broker.mutex_queue.client.close()
     await matrix_broker.broadcast_queue.client.close()
+    await matrix_broker.replication_queue.client.close()
 
     # create mock queue clients for the broker
     mock_device_queue_client = AsyncMock()
     mock_broadcast_queue_client = AsyncMock()
     mock_mutex_queue_client = AsyncMock()
+    mock_replication_queue_client = AsyncMock()
     matrix_broker.device_queue.client = mock_device_queue_client
     matrix_broker.broadcast_queue.client = mock_broadcast_queue_client
     matrix_broker.mutex_queue.client = mock_mutex_queue_client
+    matrix_broker.replication_queue.client = mock_replication_queue_client
 
     # shut down the MatrixBroker object
     await matrix_broker.shutdown()
@@ -403,6 +395,7 @@ async def test_matrix_broker_shutdown_proper_shutdown(test_matrix_broker):
     matrix_broker.device_queue.client.close.assert_called_once()
     matrix_broker.broadcast_queue.client.close.assert_called_once()
     matrix_broker.mutex_queue.client.close.assert_called_once()
+    matrix_broker.replication_queue.client.close.assert_called_once()
 
 
 @pytest.mark.integtest
@@ -455,13 +448,13 @@ async def test_matrix_broker_startup(test_matrix_broker):
 
     # mock matrix broker function
     matrix_broker.add_mutex_checkpoint_task = AsyncMock()
-    matrix_broker.update_device_checkpoints = AsyncMock()
+    matrix_broker.update_checkpoints = AsyncMock()
 
     res = await matrix_broker.startup()
 
     # verify that the applicable functions were only called once
     matrix_broker.add_mutex_checkpoint_task.assert_called_once()
-    matrix_broker.update_device_checkpoints.assert_called_once()
+    matrix_broker.update_checkpoints.assert_called_once()
 
 
 async def test_matrix_broker_kick_functional_test(test_matrix_broker, test_broker_message):
