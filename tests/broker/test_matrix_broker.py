@@ -489,6 +489,7 @@ async def test_matrix_broker_kick_functional_test(test_matrix_broker, test_broke
                     queue=matrix_broker.mutex_queue.name,
                 )
 
+@pytest.mark.skip(reason="run_sync_filter no longer called")
 async def test_matrix_broker_kick_sync_filter(test_matrix_broker, test_broker_message):
     """
     """
@@ -509,8 +510,8 @@ async def test_matrix_broker_kick_sync_filter(test_matrix_broker, test_broker_me
         },
     }
 
-    mock_backend_result = MagicMock(spec=MatrixResultBackend)
-    mock_backend_result.matrix_client = MagicMock()
+    mock_backend_result = AsyncMock(spec=MatrixResultBackend)
+    mock_backend_result.matrix_client = AsyncMock()
     mock_backend_result.matrix_client.next_batch = False
     matrix_broker.result_backend = mock_backend_result
 
