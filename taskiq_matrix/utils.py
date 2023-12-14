@@ -56,6 +56,7 @@ async def send_message(
     msg_body: Dict[str, Any] = {"task": message, **kwargs}
     msg_content = {"msgtype": msgtype, "body": msg_body}
     logger.debug("Sending message: %s to room %s", msg_content, room)
+    print(f"Room: {room}")
     try:
         response = await matrix_client.room_send(room, msgtype, msg_content)
         if not isinstance(response, RoomSendResponse):

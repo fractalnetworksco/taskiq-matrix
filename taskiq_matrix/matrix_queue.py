@@ -3,7 +3,7 @@ import logging
 import os
 import socket
 from functools import partial
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
@@ -223,7 +223,10 @@ class MatrixQueue:
             raise Exception(f"Matrix room {self.room_id} not found: {res.message}")
 
     async def get_tasks(
-        self, timeout: int = 30000, since_token: Optional[str] = None
+        self,
+        timeout: int = 30000,
+        since_token: Optional[str] = None,
+        task_filter: Optional[Dict[str, Any]] = None,
     ) -> list[Task]:
         """
         Returns a list of tasks and acks.
@@ -232,19 +235,25 @@ class MatrixQueue:
             timeout (int): The timeout to use when fetching tasks.
             since_token (str): The next batch token to use when fetching tasks.
                                Defaults to the current checkpoint of the broker.
+            task_fitler (dict): A filter to use when fetching tasks. Defaults to
+                                a filter that fetches all tasks and acks for the
+                                queue.
 
         Returns:
             A list of tasks and acks.
         """
         next_batch = since_token or self.checkpoint.since_token
 
-        task_filter = create_filter(
-            self.room_id,
-            types=[self.task_types.task, f"{self.task_types.ack}.*"],
-        )
+        if not task_filter:
+            task_filter = create_filter(
+                self.room_id,
+                types=[self.task_types.task, f"{self.task_types.ack}.*"],
+            )
         task_events = await run_sync_filter(
             self.client, task_filter, timeout=timeout, since=next_batch
         )
+        # acks should be a separate type
+        # tasks should only be tasks
         tasks = [Task(**task) for task in task_events.get(self.room_id, [])]
         return tasks
 
@@ -359,7 +368,7 @@ class MatrixQueue:
             queue=self.name,
         )
 
-    async def yield_task(self, task: Task) -> AckableMessage:
+    async def yield_task(self, task: Task, ignore_acks: bool = False) -> AckableMessage:
         """
         Attempts to lock a task and yield it to a worker. If the lock is
         acquired and the task has been acked since the lock was acquired, then
@@ -377,9 +386,10 @@ class MatrixQueue:
         """
         async with MatrixLock(room_id=self.room_id).lock(f"{self.task_types.lock}.{task.id}"):
             # ensure that task has not been acked since lock was acquired
-            acked = await self.task_is_acked(task.id)
-            if acked:
-                raise TaskAlreadyAcked(task.id)
+            if not ignore_acks:
+                acked = await self.task_is_acked(task.id)
+                if acked:
+                    raise TaskAlreadyAcked(task.id)
 
             # encode task data
             task_data = json.dumps(task.data).encode("utf-8")
