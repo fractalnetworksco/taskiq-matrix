@@ -1,6 +1,7 @@
 import json
 from base64 import b64encode
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
+from fractal.matrix.async_client import FractalAsyncClient
 
 import pytest
 from nio import MatrixRoom, RoomMessagesResponse, SyncResponse
@@ -467,9 +468,16 @@ async def test_matrix_lock_filter_no_kwargs(new_matrix_room):
 
     lock = MatrixLock(room_id=room_id)
     lock_types = [f"fn.lock.acquire.None", f"fn.lock.release.None"]
-    next = await lock.get_latest_sync_token()
-    print('next=====', next)
-    lock.client.next_batch = next
+
+    mock_client = MagicMock(spec=FractalAsyncClient)
+    mock_sync = AsyncMock()
+    mock_client.sync = mock_sync
+
+    # ! look at test_filters and do something similar
+
+    # next = await lock.get_latest_sync_token()
+    # print('next=====', next)
+    # lock.client.next_batch = next
 
     res = await lock.filter(
         lock.create_filter(types=lock_types), timeout=0
