@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nio import RoomGetStateEventError, RoomGetStateEventResponse
-
 from taskiq_matrix.matrix_queue import LockAcquireError, MatrixQueue, Task
 from taskiq_matrix.utils import send_message
 
@@ -27,7 +26,7 @@ async def test_matrix_queue_verify_room_exists_error():
     with pytest.raises(Exception) as e:
         await matrix_queue.verify_room_exists()
 
-    await matrix_queue.client.close()
+    await matrix_queue.shutdown()
 
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
@@ -51,7 +50,7 @@ async def test_matrix_queue_verify_room_exists_exists():
 
     # verify that room_get_state_event() was only called once
     matrix_queue.client.room_get_state_event.assert_called_once()
-    await matrix_queue.client.close()
+    await matrix_queue.shutdown()
 
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
@@ -72,6 +71,7 @@ async def test_matrix_queue_get_tasks_return_tasks():
                 "queue": "mutex",
             },
             "msgtype": "task",
+            "sender": "sender",
         },
         {
             "body": {
@@ -80,6 +80,7 @@ async def test_matrix_queue_get_tasks_return_tasks():
                 "queue": "mutex",
             },
             "msgtype": "task",
+            "sender": "sender",
         },
     ]
 
@@ -102,6 +103,8 @@ async def test_matrix_queue_get_tasks_return_tasks():
                 assert result[i].data == expected_tasks[i].data
                 assert result[i].queue == expected_tasks[i].queue
 
+    await matrix_queue.shutdown()
+
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_filter_acked_tasks_proper_filter():
@@ -119,6 +122,7 @@ async def test_matrix_queue_filter_acked_tasks_proper_filter():
                 "queue": "mutex",
             },
             "msgtype": "test_matrix_queue",
+            "sender": "sender",
         },
         {
             "body": {
@@ -127,6 +131,7 @@ async def test_matrix_queue_filter_acked_tasks_proper_filter():
                 "queue": "mutex",
             },
             "msgtype": "test_matrix_queue.2",
+            "sender": "sender",
         },
     ]
 
@@ -147,6 +152,8 @@ async def test_matrix_queue_filter_acked_tasks_proper_filter():
     # the Task that was created locally
     assert len(unacked_tasks) == 1
     assert unacked_tasks[0] == test_task_objects[0]
+
+    await matrix_queue.shutdown()
 
 
 @pytest.mark.integtest  # depends on MatrixBroker clients and send_message
@@ -362,6 +369,8 @@ async def test_matrix_queue_all_tasks_acked_unacked_tasks_only(test_matrix_broke
     # verify that all_tasks_acked() returns False
     assert await matrix_queue.all_tasks_acked() == False
 
+    await test_broker.shutdown()
+
 
 @pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_all_tasks_acked_acked_tasks_only(test_matrix_broker):
@@ -407,6 +416,8 @@ async def test_matrix_queue_all_tasks_acked_acked_tasks_only(test_matrix_broker)
 
     # verify that all_tasks_acked() returns True
     assert await matrix_queue.all_tasks_acked()
+
+    await test_broker.shutdown()
 
 
 @pytest.mark.integtest  # depends on MatrixBroker clients and send_message
@@ -467,6 +478,8 @@ async def test_matrix_queue_all_tasks_acked_mixed_tasks(test_matrix_broker):
     # verify that not all tasks are acknowledged
     assert await matrix_queue.all_tasks_acked() == False
 
+    await test_broker.shutdown()
+
 
 @pytest.mark.integtest  # depends on MatrixBroker clients and send_message
 async def test_matrix_queue_task_is_acked_unacked_task(test_matrix_broker):
@@ -501,6 +514,8 @@ async def test_matrix_queue_task_is_acked_unacked_task(test_matrix_broker):
 
     # verify that the task is still unacked
     assert await matrix_queue.task_is_acked(event2["task_id"]) == False
+
+    await test_broker.shutdown()
 
 
 @pytest.mark.integtest  # depends on MatrixBroker clients and send_message
@@ -537,6 +552,8 @@ async def test_matrix_queue_task_is_acked_acked_task(test_matrix_broker):
     # verify that the task is acknowledged and sent to the queue
     assert await matrix_queue.task_is_acked(event2["task_id"])
 
+    await test_broker.shutdown()
+
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_ack_msg_uses_given_id():
@@ -571,6 +588,8 @@ async def test_matrix_queue_ack_msg_uses_given_id():
             queue=matrix_queue.name,
         )
 
+    await matrix_queue.shutdown()
+
 
 @pytest.mark.integtest  # depends on Task
 async def test_matrix_queue_yield_task_lock_fail():
@@ -587,6 +606,7 @@ async def test_matrix_queue_yield_task_lock_fail():
             "queue": "mutex",
         },
         "msgtype": "task",
+        "sender": "sender",
     }
 
     # create a Task object using the dictionary from above
@@ -606,6 +626,8 @@ async def test_matrix_queue_yield_task_lock_fail():
             await matrix_queue.yield_task(test_task)
             matrix_queue.task_is_acked.assert_not_caled()
 
+    await matrix_queue.shutdown()
+
 
 @pytest.mark.integtest  # depends on Task
 async def test_matrix_queue_yield_task_already_acked():
@@ -622,6 +644,7 @@ async def test_matrix_queue_yield_task_already_acked():
             "queue": "mutex",
         },
         "msgtype": "task",
+        "sender": "sender",
     }
 
     # create a Task object using the dictionary from above
@@ -640,9 +663,11 @@ async def test_matrix_queue_yield_task_already_acked():
         await matrix_queue.yield_task(test_task)
         assert e == "Task 1 has already been acked"
 
+    await matrix_queue.shutdown()
+
 
 @pytest.mark.integtest  # depends on Task
-async def test_matrix_queue_yield_task_not_acked():
+async def test_matrix_queue_yield_task_not_acked(new_matrix_room):
     """
     Tests that a yielded tast that has not been acknowledged will
     return an Ackablemessage object
@@ -656,13 +681,15 @@ async def test_matrix_queue_yield_task_not_acked():
             "queue": "mutex",
         },
         "msgtype": "task",
+        "sender": "sender",
     }
 
     # create a Task object using the dictionary from above
     test_task = Task(**test_task_info)
 
+    room_id = await new_matrix_room()
     # create a MatrixQueue object
-    matrix_queue = MatrixQueue(name="test_matrix_queue")
+    matrix_queue = MatrixQueue(name="test_matrix_queue", room_id=room_id)
 
     # mock the matrix queue's task_is_acked() function to have it
     # return true
@@ -680,3 +707,5 @@ async def test_matrix_queue_yield_task_not_acked():
     assert acked_message.data == data
     assert acked_message.ack.func == ack.func
     assert acked_message.ack.args == ack.args
+
+    await matrix_queue.shutdown()

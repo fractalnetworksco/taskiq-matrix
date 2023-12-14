@@ -3,60 +3,10 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import AsyncClient, SyncError, SyncResponse
-from taskiq_matrix.filters import (
-    create_filter,
-    get_first_unacked_task,
-    get_sync_token,
-    run_sync_filter,
-)
 
-
-async def test_filters_get_sync_token_sync_error():
-    """
-    Tests that an exception is raised if client.sync() returns a SyncError
-    """
-
-    # create an AsyncClient object
-    test_client = AsyncClient(user="test_user", homeserver="test_homeserver")
-
-    # set the sync method to return a SyncError and set it's error message
-    test_client.sync = AsyncMock()
-    mock_response = AsyncMock(spec=SyncError)
-    mock_response.message = "test error message"
-    test_client.sync.return_value = mock_response
-
-    # call get_sync_token to raise the exception
-    with pytest.raises(Exception) as e:
-        await get_sync_token(test_client)
-
-    # verify that sync was called and that the error message raised is the
-    # same as the one set locally
-    test_client.sync.assert_called_once()
-    assert str(e.value) == mock_response.message
-
-
-async def test_filters_get_sync_token_verify_next_batch():
-    """
-    Tests that the function returns the same next_batch as the one created locally
-    """
-
-    # create an AsyncClient object
-    test_client = AsyncClient(user="test_user", homeserver="test_homeserver")
-
-    # set the sync method to return a SyncResponse and set it's next_batch
-    test_client.sync = AsyncMock()
-    mock_response = AsyncMock(spec=SyncResponse)
-    mock_response.next_batch = "abc"
-    test_client.sync.return_value = mock_response
-
-    # call get_sync_token and store the result
-    result = await get_sync_token(test_client)
-
-    # verify that sync was called once and that the next_batch token that is
-    # returned matches what was set locally
-    test_client.sync.assert_called_once()
-    assert result == "abc"
+from taskiq_matrix.filters import create_filter, get_first_unacked_task, run_sync_filter
 
 
 async def test_filters_run_sync_filter_sync_error():
@@ -66,7 +16,7 @@ async def test_filters_run_sync_filter_sync_error():
     """
 
     # create an AsyncClient object
-    test_client = AsyncClient(user="test_user", homeserver="test_homeserver")
+    test_client = FractalAsyncClient(user="test_user", homeserver_url="test_homeserver")
 
     # set the sync method to return a SyncError and set it's error message
     test_client.sync = AsyncMock()
@@ -83,6 +33,8 @@ async def test_filters_run_sync_filter_sync_error():
     test_client.sync.assert_called_once()
     assert str(e.value) == mock_response.message
 
+    await test_client.close()
+
 
 async def test_filters_run_sync_filter_false_content_only():
     """
@@ -91,7 +43,7 @@ async def test_filters_run_sync_filter_false_content_only():
     """
 
     # create a mock AsyncClient object and mock its sync function
-    mock_client = MagicMock(spec=AsyncClient)
+    mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
 
@@ -129,7 +81,7 @@ async def test_filters_run_sync_filter_false_content_only():
     }
 
 
-async def test_filters_run_sync_filter_true_content_only():
+async def test_filters_run_sync_filter_true_content_only(unknown_event_factory):
     """
     Test that setting content_only to True returns a dictionary of rooms
     with a list of what was the value associated with the 'content' key of the
@@ -137,7 +89,7 @@ async def test_filters_run_sync_filter_true_content_only():
     """
 
     # create a mock AsyncClient object and mock its sync function
-    mock_client = MagicMock(spec=AsyncClient)
+    mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
 
@@ -152,11 +104,11 @@ async def test_filters_run_sync_filter_true_content_only():
 
     # create a dictionary of mock event objects and assign them a room
     mock_client.sync.return_value.rooms.join["room1"].timeline.events = [
-        AsyncMock(source={"content": "event1"}),
-        AsyncMock(source={"content": "event2"}),
+        unknown_event_factory("event1", "sender1"),
+        unknown_event_factory("event2", "sender2"),
     ]
     mock_client.sync.return_value.rooms.join["room2"].timeline.events = [
-        AsyncMock(source={"content": "event3"}),
+        unknown_event_factory("event3", "sender3"),
     ]
 
     # Call the run_sync_filter function
@@ -170,72 +122,15 @@ async def test_filters_run_sync_filter_true_content_only():
 
     # assert the structure of the result
     assert result == {
-        "room1": ["event1", "event2"],
-        "room2": ["event3"],
-    }
-
-
-async def test_filters_run_sync_filter_with_kwargs():
-    """
-    Test that run_sync_filters properly filters events using kwargs
-    """
-
-    # create a mock AsyncClient object and mock its sync function
-    mock_client = MagicMock(spec=AsyncClient)
-    mock_sync = AsyncMock()
-    mock_client.sync = mock_sync
-    content_only = False
-
-    # create a dictionary of rooms
-    mock_client.sync.return_value.rooms.join = {
-        "room1": MagicMock(),
-        "room2": MagicMock(),
-    }
-
-    # create a dictionary of mock event objects and assign them a room, making
-    # sure to include events with key:value pairs that don't align with the kwargs that
-    # will be passed
-    mock_client.sync.return_value.rooms.join["room1"].timeline.events = [
-        AsyncMock(source={"content": "event1", "key1": "value1", "key2": "value2"}),
-        AsyncMock(source={"content": "event2", "key1": "value1", "key2": "value2"}),
-        AsyncMock(source={"content": "event3", "key1": "value3", "key2": "value3"}),
-    ]
-    mock_client.sync.return_value.rooms.join["room2"].timeline.events = [
-        AsyncMock(source={"content": "event4", "key1": "value1", "key2": "value2"}),
-    ]
-
-    # set the kwargs to further filter the events
-    test_kwargs = {
-        "key1": "value1",
-        "key2": "value2",
-    }
-
-    # Call the run_sync_filter function
-    result = await run_sync_filter(
-        client=mock_client,
-        filter={},
-        timeout=30000,
-        since=None,
-        content_only=content_only,
-        **test_kwargs,
-    )
-
-    # set the expectation for the structure of the dictionary that is returned
-    expected_result = {
         "room1": [
-            {"content": "event1", "key1": "value1", "key2": "value2"},
-            {"content": "event2", "key1": "value1", "key2": "value2"},
+            {"body": "event1", "sender": "sender1", "type": "test.event"},
+            {"body": "event2", "sender": "sender2", "type": "test.event"},
         ],
-        "room2": [
-            {"content": "event4", "key1": "value1", "key2": "value2"},
-        ],
+        "room2": [{"body": "event3", "sender": "sender3", "type": "test.event"}],
     }
 
-    # verify that the dictionary that is returned matches what was expected
-    assert result == expected_result
 
-
-@pytest.mark.integtest # ? "not" and "append" appear to be external functions
+@pytest.mark.integtest  # ? "not" and "append" appear to be external functions
 async def test_filters_get_first_unacked_task_mixed_tasks():
     """
     Tests that the first unacked task in a list is returned. Duplicate tasks are
@@ -268,7 +163,7 @@ async def test_filters_get_first_unacked_task_mixed_tasks():
     )
 
 
-@pytest.mark.integtest # depends on "append" and "not"
+@pytest.mark.integtest  # depends on "append" and "not"
 async def test_filters_get_first_unacked_task_only_acked_tasks():
     """
     Tests that no tasks are returned if no unacked tasks are passed to it
@@ -289,7 +184,7 @@ async def test_filters_get_first_unacked_task_only_acked_tasks():
     assert result == {}
 
 
-@pytest.mark.integtest # depends on uuid
+@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_with_limit():
     """
     Tests that create_filter returns a dictionary with the same room_id and limit that
@@ -308,7 +203,7 @@ async def test_filters_create_filter_with_limit():
     assert filter["room"]["timeline"]["limit"] == test_limit
 
 
-@pytest.mark.integtest # depends on uuid
+@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_no_limit():
     """
     Tests that a dictionary with the correct room_id and missing the limit key is

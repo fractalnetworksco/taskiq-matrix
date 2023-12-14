@@ -1,15 +1,15 @@
 [tool.poetry]
 name = "taskiq-matrix"
-version = "0.1.0"
+version = "0.0.2"
 description = ""
 authors = ["Mo Balaa <balaa@ether.ai>"]
+readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-taskiq = { git = "https://github.com/taskiq-python/taskiq.git", branch = "develop", rev = "bba29c4dc383c48477f4969f0e8708a70d0cdea5" }
-# taskiq = "^0.10.2"
+taskiq = "^0.10.4"
 matrix-nio = "^0.22.1"
-fractal-matrix-client = "^0.1.0"
+fractal-matrix-client = "^0.0.1"
 
 docker = { version = "^6.1.3", optional = true }
 pytest = { version = "^7.4.2", optional = true }

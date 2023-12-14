@@ -1,10 +1,11 @@
-from typing import Any, Dict, Optional
+from copy import deepcopy
+from typing import Any, Dict, Optional, Union
 from uuid import uuid4
 
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import SyncError
 
-EMPTY_FILTER = {
+EMPTY_FILTER: Dict[str, Union[Dict[str, Any], str]] = {
     "presence": {"limit": 0, "types": []},
     "account_data": {"limit": 0, "types": []},
     "room": {
@@ -81,16 +82,6 @@ def create_filter(
     }
 
 
-async def get_sync_token(client: FractalAsyncClient) -> str:
-    """
-    Runs an empty sync request and returns the next_batch token.
-    """
-    res = await client.sync(timeout=0, sync_filter=EMPTY_FILTER, since=None)
-    if isinstance(res, SyncError):
-        raise Exception(res.message)
-    return res.next_batch
-
-
 async def run_sync_filter(
     client: FractalAsyncClient,
     filter: dict,
@@ -125,10 +116,6 @@ async def run_sync_filter(
         else:
             d[room] = [event.source for event in res.rooms.join[room].timeline.events]
 
-    if kwargs:
-        # filter out all keys by value from kwargs
-        for key in filter_keys:
-            d = {k: [i for i in v if i.get(key) == kwargs[key]] for k, v in d.items()}
     return d
 
 
