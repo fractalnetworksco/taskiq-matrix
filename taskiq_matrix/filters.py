@@ -42,6 +42,7 @@ def create_filter(
     not_types: list = [],
     limit: Optional[int] = None,
     not_senders: list = [],
+    room_event_filter: bool = False,
 ) -> Dict[str, Any]:
     """
     Create a filter for a room and/or specific message types.
@@ -49,23 +50,7 @@ def create_filter(
     Returns:
         filter dict
     """
-    if limit is None:
-        return {
-            "presence": {"limit": 0, "types": []},
-            "account_data": {"limit": 0, "types": []},
-            "room": {
-                "rooms": [room_id],
-                "state": {"types": [], "limit": 0},
-                "timeline": {
-                    "types": [*types],
-                    "not_types": [*not_types],
-                    "not_senders": [*not_senders],
-                },
-            },
-            "request_id": str(uuid4()),
-        }
-
-    return {
+    message_filter = {
         "presence": {"limit": 0, "types": []},
         "account_data": {"limit": 0, "types": []},
         "room": {
@@ -75,11 +60,19 @@ def create_filter(
                 "types": [*types],
                 "not_types": [*not_types],
                 "not_senders": [*not_senders],
-                "limit": limit,
             },
         },
         "request_id": str(uuid4()),
     }
+    if limit is not None:
+        message_filter["room"]["timeline"]["limit"] = limit
+
+    if room_event_filter:
+        room_filter = message_filter["room"]["timeline"]
+        room_filter["request_id"] = message_filter["request_id"]
+        return room_filter
+
+    return message_filter
 
 
 async def run_sync_filter(
