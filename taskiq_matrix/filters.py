@@ -174,7 +174,6 @@ async def run_room_message_filter(
     else:
         d[room_id] = [event.source for event in res.chunk]
 
-    print(f"Got res.end: {res.end}")
     return d, res.end
 
 
