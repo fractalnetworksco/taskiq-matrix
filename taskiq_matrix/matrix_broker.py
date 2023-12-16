@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import socket
-from typing import Any, AsyncGenerator, List, Optional, Self, TypeVar
+from typing import Any, AsyncGenerator, List, Optional, Self, TypeVar, Union
 from uuid import uuid4
 
 from fractal.matrix.async_client import FractalAsyncClient
@@ -390,7 +390,7 @@ class MatrixBroker(AsyncBroker):
                     pending_task.cancel()
             yield list(itertools.chain.from_iterable(sync_task_results))
 
-    async def listen(self) -> AsyncGenerator[AckableMessage, Any]:
+    async def listen(self) -> AsyncGenerator[Union[AckableMessage, bytes], Any]:
         """
         Listen Matrix for new messages.
 
