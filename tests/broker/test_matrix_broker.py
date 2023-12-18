@@ -18,20 +18,204 @@ from taskiq_matrix.exceptions import (
     DeviceQueueRequiresDeviceLabel,
     ScheduledTaskRequiresTaskIdLabel,
 )
-from taskiq_matrix.matrix_broker import LockAcquireError, MatrixBroker
+from taskiq_matrix.matrix_broker import (
+    AsyncBroker,
+    LockAcquireError,
+    MatrixBroker,
+    MatrixResultBackend,
+)
 from taskiq_matrix.matrix_queue import MatrixQueue
 
 
-async def test_matrix_broker_environment_not_set():
+async def test_matrix_broker_homeserver_url_not_set():
     """
-    Tests the exception that is raised if the environment does not have a
-    HS_ROOM_ID variable set
+    Tests the exception that is raised if the os.environ dictionary doesn't have a
+    value for MATRIX_HOMESERVER_URL
     """
+    expected_error = "Missing required environment variable: 'MATRIX_HOMESERVER_URL'"
 
     # patch the os.environ dictionary to be cleared
     with patch.dict(os.environ, {}, clear=True):
-        with pytest.raises(KeyError):
+        with pytest.raises(KeyError) as e:
             mb = MatrixBroker()
+
+        # verify that the error raised os for the homeserver url
+        assert str(e.value) == f'"{expected_error}"'
+
+
+async def test_matrix_broker_access_token_not_set():
+    """
+    Tests the exception that is raised if the os.environ dictionary doesn't have a
+    value for MATRIX_ACCESS_TOKEN
+    """
+    expected_error = "Missing required environment variable: 'MATRIX_ACCESS_TOKEN'"
+
+    # patch the os.environ dictionary
+    with patch.dict(os.environ, {"MATRIX_ACCESS_TOKEN": "test_url"}):
+        # delete the matrix access token key-value pair
+        del os.environ["MATRIX_ACCESS_TOKEN"]
+
+        # create a matrix broker object to
+        with pytest.raises(KeyError) as e:
+            mb = MatrixBroker()
+
+        # verify that the error raised os for the access token
+        assert str(e.value) == f'"{expected_error}"'
+
+
+async def test_matrix_broker_init_queues_no_existing_queues():
+    """
+    Tests that queues are created for a broker with no existing queues.
+    """
+
+    # create a MatrixBroker object
+    test_broker = MatrixBroker()
+
+    # verify that the broker has no queues
+    assert not hasattr(test_broker, "mutex_queue")
+    assert not hasattr(test_broker, "device_queue")
+    assert not hasattr(test_broker, "broadcast_queue")
+    assert not hasattr(test_broker, "replication_queue")
+
+    # call _init_queues
+    test_broker._init_queues()
+
+    # verify that the broker now has queues
+    assert hasattr(test_broker, "mutex_queue")
+    assert hasattr(test_broker, "device_queue")
+    assert hasattr(test_broker, "broadcast_queue")
+    assert hasattr(test_broker, "replication_queue")
+
+
+async def test_matrix_broker_init_queues_existing_queues(test_matrix_broker):
+    """
+    Tests that constructors are not called for the broker's queues if there are
+    already existing queues for that broker.
+    """
+
+    # create a broker fixture with existing queues
+    test_broker = await test_matrix_broker()
+
+    # verify that the broker already has queues
+    assert hasattr(test_broker, "mutex_queue")
+    assert hasattr(test_broker, "device_queue")
+    assert hasattr(test_broker, "broadcast_queue")
+    assert hasattr(test_broker, "replication_queue")
+
+    # patch the MatrixQueue class to check for constructor calls
+    with patch("taskiq_matrix.matrix_queue.MatrixQueue") as mock_queue:
+        # call _init_queues
+        test_broker._init_queues()
+
+        # verify that the constructors weren't called
+        mock_queue.assert_not_called()
+
+
+async def test_matrix_broker_init_queues_no_room_id_use_environment_variable():
+    """
+    Tests that if None is given as a room ID and the broker does not have a room ID,
+    that the matrix room id from the os.environ dictionary is used
+    """
+
+    # create a MatrixBroker object
+    test_broker = MatrixBroker()
+
+    # verify that there is no existing room id
+    assert test_broker.room_id == None
+    # save the environment variable for the room id
+    environment_room_id = os.environ["MATRIX_ROOM_ID"]
+
+    # verify that there are no existing queues in the broker
+    assert not hasattr(test_broker, "mutex_queue")
+    assert not hasattr(test_broker, "device_queue")
+    assert not hasattr(test_broker, "broadcast_queue")
+    assert not hasattr(test_broker, "replication_queue")
+
+    # call _init_queues
+    test_broker._init_queues(None)
+
+    # verify that the broker now has queues
+    assert hasattr(test_broker, "mutex_queue")
+    assert hasattr(test_broker, "device_queue")
+    assert hasattr(test_broker, "broadcast_queue")
+    assert hasattr(test_broker, "replication_queue")
+
+    # verify that the broker queues' room_id match the environment's room_id
+    assert test_broker.mutex_queue.room_id == environment_room_id
+    assert test_broker.device_queue.room_id == environment_room_id
+    assert test_broker.broadcast_queue.room_id == environment_room_id
+    assert test_broker.replication_queue.room_id == environment_room_id
+
+
+async def test_matrix_broker_init_queues_no_room_id_use_broker_id():
+    """
+    Tests that if None is given as a room ID, the broker's room id is used
+    """
+
+    # create a MatrixBroker object
+    test_broker = MatrixBroker()
+
+    # set the broker's room id to a custom id
+    broker_room_id = "test_room_id"
+    test_broker.room_id = broker_room_id
+
+    # verify that there are no existing queues in the broker
+    assert not hasattr(test_broker, "mutex_queue")
+    assert not hasattr(test_broker, "device_queue")
+    assert not hasattr(test_broker, "broadcast_queue")
+    assert not hasattr(test_broker, "replication_queue")
+
+    # call _init_queues
+    test_broker._init_queues(None)
+
+    # verify that the broker now has queues
+    assert hasattr(test_broker, "mutex_queue")
+    assert hasattr(test_broker, "device_queue")
+    assert hasattr(test_broker, "broadcast_queue")
+    assert hasattr(test_broker, "replication_queue")
+
+    # verify that the broker queues' room_id match the environment's room_id
+    assert test_broker.mutex_queue.room_id == broker_room_id
+    assert test_broker.device_queue.room_id == broker_room_id
+    assert test_broker.broadcast_queue.room_id == broker_room_id
+    assert test_broker.replication_queue.room_id == broker_room_id
+
+
+async def test_matrix_broker_with_result_backend_not_instance(test_matrix_broker):
+    """
+    Tests that an exception is raised if an object is passed to with_result_backend
+    that is not a MatrixResultBackend object
+    """
+
+    # create a MatrixBroker object from a fixture
+    test_broker = await test_matrix_broker()
+    # create a generic mock object that is not a MatrixResultBackend
+    mock_backend = MagicMock()
+
+    # call with_result_backend to raise an exception
+    with pytest.raises(
+        Exception, match="result_backend must be an instance of MatrixResultBackend"
+    ):
+        test_broker.with_result_backend(mock_backend)
+
+
+async def test_matrix_broker_with_result_backend_is_instance(test_matrix_broker):
+    """
+    Tests that if a MatrixResultBackend object is passed to with_result_backend, the
+    superclass' with_result_backend is called with the same object
+    """
+
+    # create a MatrixBroker object from a fixture
+    test_broker = await test_matrix_broker()
+
+    # mock a MatrixResultBackend object
+    mock_backend = MagicMock(spec=MatrixResultBackend)
+
+    # mock the super class' with_result_backend function
+    with patch.object(AsyncBroker, "with_result_backend") as mock_super:
+        # call with_result_backend and verify that the super class called it as well
+        test_broker.with_result_backend(mock_backend)
+        mock_super.assert_called_once_with(mock_backend)
 
 
 @pytest.mark.integtest
@@ -58,6 +242,30 @@ async def test_matrix_broker_add_mutex_checkpoint_task_unknown_error(test_matrix
     with pytest.raises(Exception):
         await broker.add_mutex_checkpoint_task()
 
+
+@pytest.mark.integtest
+async def test_matrix_broker_add_mutex_checkpoint_task_known_error(test_matrix_broker):
+    """
+    Tests exception raised if room get state event in the mutex queue
+    is an error and that error status code is not "M_NOT_FOUND"
+    """
+
+    # create matrix broker object
+    broker = await test_matrix_broker()
+
+    # mock the matrix broker's mutex queue and client
+    mock_mutex_queue = MagicMock()
+    mock_mutex_queue.client = AsyncMock()
+    broker.mutex_queue = mock_mutex_queue
+
+    # set room_get_state_event to return a RoomGetStateEventError
+    mock_mutex_queue.client.room_get_state_event.return_value = RoomGetStateEventError(
+        status_code="M_NOT_FOUND", message="Test Error Message"
+    )
+
+    with patch('taskiq_matrix.matrix_broker.logger', new=MagicMock()) as mock_logger: 
+        await broker.add_mutex_checkpoint_task()
+        mock_logger.info.assert_called_once()
 
 @pytest.mark.integtest
 async def test_matrix_broker_integration_test(test_matrix_broker):
@@ -370,6 +578,7 @@ async def test_matrix_broker_kick_functional_test(test_matrix_broker, test_broke
     """
     Tests that kick calls send_message with the appropriate information
     """
+
     # create a MatrixBroker object
     matrix_broker: MatrixBroker = await test_matrix_broker()
 
@@ -404,7 +613,6 @@ async def test_matrix_broker_kick_no_task_id(test_matrix_broker, test_broker_mes
     """
     Test that a ValueError is raised when there is no task_id present in
     message.labels
-    ~~~add to spreadsheet~~~
     """
 
     # create a MatrixBroker object
@@ -427,7 +635,6 @@ async def test_matrix_broker_kick_no_task_id(test_matrix_broker, test_broker_mes
 )
 async def test_matrix_broker_kick_lock_success(test_matrix_broker, test_broker_message):
     """
-    Got coverage but didn't pass assertion test, assertion error
     """
 
     # create a MatrixBroker object
@@ -521,7 +728,7 @@ async def test_matrix_broker_kick_no_scheduled_task(test_matrix_broker, test_bro
 
 
 @pytest.mark.integtest
-async def test_kick_device_queue_raises_exception_if_no_device_label(
+async def test_matrix_broker_kick_device_queue_raises_exception_if_no_device_label(
     matrix_client: AsyncClient,
     test_matrix_broker: Callable[[], Awaitable[MatrixBroker]],
     test_broker_message: BrokerMessage,
@@ -536,14 +743,14 @@ async def test_kick_device_queue_raises_exception_if_no_device_label(
         "device.laptop",
         homeserver_url=matrix_client.homeserver,
         access_token=matrix_client.access_token,
-        room_id=broker.room_id,
+        room_id=broker.room_id, #type:ignore
         device_name="laptop",
     )
     desktop_queue = MatrixQueue(
         "device.desktop",
         homeserver_url=matrix_client.homeserver,
         access_token=matrix_client.access_token,
-        room_id=broker.room_id,
+        room_id=broker.room_id, #type:ignore
         device_name="desktop",
     )
 
