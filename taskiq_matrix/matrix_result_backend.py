@@ -27,9 +27,11 @@ logger = logging.getLogger(__name__)
 class MatrixResultBackend(AsyncResultBackend):
     def __init__(
         self,
+        homeserver_url: str,
+        access_token: str,
+        room_id: str,
         result_ex_time: Optional[int] = None,
         result_px_time: Optional[int] = None,
-        room_id: Optional[str] = None,
     ):
         """
         Constructs a new Matrix result backend.
@@ -37,10 +39,12 @@ class MatrixResultBackend(AsyncResultBackend):
         :param result_ex_time: expire time in seconds for result.
         :param result_px_time: expire time in milliseconds for result.
         """
-        self.room = room_id or os.environ.get("MATRIX_ROOM_ID")
+        self.room = room_id
+        self.homeserver_url = homeserver_url
+        self.access_token = access_token
         self.matrix_client = FractalAsyncClient(
-            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
-            access_token=os.environ["MATRIX_ACCESS_TOKEN"],
+            homeserver_url=homeserver_url,
+            access_token=access_token,
             room_id=self.room,
         )
         self.result_ex_time = result_ex_time
