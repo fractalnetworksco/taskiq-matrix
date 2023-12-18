@@ -468,6 +468,7 @@ async def test_matrix_lock_filter_no_kwargs(new_matrix_room):
 
     lock = MatrixLock(room_id=room_id)
     lock_types = [f"fn.lock.acquire.None", f"fn.lock.release.None"]
+    # ? might need to put checkpoint state
 
     mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
