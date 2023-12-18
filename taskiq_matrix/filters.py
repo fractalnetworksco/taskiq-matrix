@@ -1,9 +1,9 @@
 from copy import deepcopy
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 from uuid import uuid4
 
 from fractal.matrix.async_client import FractalAsyncClient
-from nio import SyncError
+from nio import BadEvent, Event, MessageDirection, RoomMessagesError, SyncError
 
 EMPTY_FILTER: Dict[str, Union[Dict[str, Any], str]] = {
     "presence": {"limit": 0, "types": []},
@@ -42,6 +42,7 @@ def create_filter(
     not_types: list = [],
     limit: Optional[int] = None,
     not_senders: list = [],
+    room_event_filter: bool = False,
 ) -> Dict[str, Any]:
     """
     Create a filter for a room and/or specific message types.
@@ -49,23 +50,7 @@ def create_filter(
     Returns:
         filter dict
     """
-    if limit is None:
-        return {
-            "presence": {"limit": 0, "types": []},
-            "account_data": {"limit": 0, "types": []},
-            "room": {
-                "rooms": [room_id],
-                "state": {"types": [], "limit": 0},
-                "timeline": {
-                    "types": [*types],
-                    "not_types": [*not_types],
-                    "not_senders": [*not_senders],
-                },
-            },
-            "request_id": str(uuid4()),
-        }
-
-    return {
+    message_filter = {
         "presence": {"limit": 0, "types": []},
         "account_data": {"limit": 0, "types": []},
         "room": {
@@ -75,11 +60,61 @@ def create_filter(
                 "types": [*types],
                 "not_types": [*not_types],
                 "not_senders": [*not_senders],
-                "limit": limit,
             },
         },
         "request_id": str(uuid4()),
     }
+    if limit is not None:
+        message_filter["room"]["timeline"]["limit"] = limit
+
+    if room_event_filter:
+        room_filter = message_filter["room"]["timeline"]
+        room_filter["request_id"] = message_filter["request_id"]
+        return room_filter
+
+    return message_filter
+
+
+def create_sync_filter(
+    room_id: str,
+    types: list = [],
+    not_types: list = [],
+    limit: Optional[int] = None,
+    not_senders: list = [],
+):
+    """
+    Creates a filter that works with the sync endpoint.
+    """
+    return create_filter(
+        room_id, types=types, not_types=not_types, limit=limit, not_senders=not_senders
+    )
+
+
+def create_room_message_filter(
+    room_id: str,
+    types: list = [],
+    not_types: list = [],
+    limit: Optional[int] = None,
+    not_senders: list = [],
+):
+    """
+    Creates a filter that works with the room_messages endpoint.
+    """
+    return create_filter(
+        room_id,
+        types=types,
+        not_types=not_types,
+        limit=limit,
+        not_senders=not_senders,
+        room_event_filter=True,
+    )
+
+
+def _get_content_only(event: Union[Event, BadEvent]):
+    content = event.source["content"]
+    content["sender"] = event.sender
+    content["event_id"] = event.event_id
+    return content
 
 
 async def run_sync_filter(
@@ -94,12 +129,6 @@ async def run_sync_filter(
     Execute a filter with the provided client, optionally filter message body by kwargs
     attempts to deserialize json
     """
-
-    def get_content_only(event):
-        content = event.source["content"]
-        content["sender"] = event.sender
-        return content
-
     if since is None:
         client.next_batch = None
 
@@ -108,15 +137,44 @@ async def run_sync_filter(
         raise Exception(res.message)
 
     rooms = list(res.rooms.join.keys())
-    filter_keys = kwargs.keys()
     d = {}
     for room in rooms:
         if content_only:
-            d[room] = [get_content_only(event) for event in res.rooms.join[room].timeline.events]
+            d[room] = [_get_content_only(event) for event in res.rooms.join[room].timeline.events]
         else:
             d[room] = [event.source for event in res.rooms.join[room].timeline.events]
 
     return d
+
+
+async def run_room_message_filter(
+    client: FractalAsyncClient,
+    room_id: str,
+    filter: dict,
+    since: Optional[str] = None,
+    content_only: bool = True,
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    """
+    Execute a room message request with the provided client attempts to deserialize json
+    """
+    since = since or ""
+    res = await client.room_messages(
+        room_id,
+        start=since,
+        limit=100,
+        direction=MessageDirection.front,
+        message_filter=filter,
+    )
+    if isinstance(res, RoomMessagesError):
+        raise Exception(res.message)
+
+    d = {}
+    if content_only:
+        d[room_id] = [_get_content_only(event) for event in res.chunk]
+    else:
+        d[room_id] = [event.source for event in res.chunk]
+
+    return d, res.end
 
 
 async def get_first_unacked_task(tasks: list[Dict[str, Any]]) -> Dict[str, Any]:
