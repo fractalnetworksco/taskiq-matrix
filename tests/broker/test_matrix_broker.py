@@ -662,14 +662,9 @@ async def test_matrix_broker_kick_no_task_id(test_matrix_broker, test_broker_mes
 
 
 @pytest.mark.integtest
-@pytest.mark.skip(
-    reason="Test needs to be updated since using task_id label will update the broker message task_id"
-)
 async def test_matrix_broker_kick_lock_success(test_matrix_broker, test_broker_message):
     """
-    #! very close, need to figure out how to patch id_generator() to return a predictable
-    #! task id for comparison purposes
-    #! unable to patch super class for some reason
+    Tests that the proper message is sent if the lock is successful.
     """
 
     # create a MatrixBroker object
@@ -683,8 +678,10 @@ async def test_matrix_broker_kick_lock_success(test_matrix_broker, test_broker_m
 
     # make a second broker message to compare
     comparison_message = test_broker_message
-    task_id = "test_task_id"
-    comparison_message = matrix_broker._use_task_id(task_id, comparison_message)
+    matrix_broker.id_generator = lambda: "test_task_id"
+    test_task_id = matrix_broker.id_generator()
+    comparison_message = matrix_broker._use_task_id(test_task_id, comparison_message)
+    comparison_task_id = comparison_message.task_id
     comparison_message = comparison_message.message
 
     # create a client to patch in to ensure we have the same client
@@ -693,29 +690,28 @@ async def test_matrix_broker_kick_lock_success(test_matrix_broker, test_broker_m
         access_token=os.environ["MATRIX_ACCESS_TOKEN"],
     )
 
+
+
     # patch the send_message function and the MatrixLock.lock function
     with patch("taskiq_matrix.matrix_broker.send_message", mock_send_message):
         with patch("taskiq_matrix.matrix_broker.MatrixLock", autospec=True) as mock_lock:
             with patch(
                 "taskiq_matrix.matrix_broker.FractalAsyncClient", return_value=test_client
             ):
-                with patch(
-                    "taskiq_matrix.matrix_broker.MatrixBroker.id_generator", return_value=task_id
-                ):
-                    async_gen = await matrix_broker.kick(test_broker_message)
+                async_gen = await matrix_broker.kick(test_broker_message)
 
-                    # verify that the lock function was only called once
-                    mock_lock.assert_called_once()
+                # verify that the lock function was only called once
+                mock_lock.assert_called_once()
 
-                    # verify that send_message was called with the appropriate information
-                    mock_send_message.assert_called_with(
-                        test_client,
-                        matrix_broker.mutex_queue.room_id,
-                        comparison_message,
-                        msgtype=matrix_broker.mutex_queue.task_types.task,
-                        task_id=test_broker_message.task_id,
-                        queue=matrix_broker.mutex_queue.name,
-                    )
+                # verify that send_message was called with the appropriate information
+                mock_send_message.assert_called_with(
+                    test_client,
+                    matrix_broker.mutex_queue.room_id,
+                    comparison_message,
+                    msgtype=matrix_broker.mutex_queue.task_types.task,
+                    task_id=comparison_task_id,
+                    queue=matrix_broker.mutex_queue.name,
+                )
 
 
 @pytest.mark.integtest
@@ -843,17 +839,13 @@ async def test_matrix_broker_kick_device_queue_raises_exception_if_no_device_lab
     await desktop_queue.shutdown()
 
 @pytest.mark.integtest
-async def test_matrix_broker_kick_device_queue_valid_device_name(
-    matrix_client: AsyncClient,
+async def test_matrix_broker_kick_device_queue_valid_device_label(
     test_matrix_broker: Callable[[], Awaitable[MatrixBroker]],
     test_broker_message: BrokerMessage,
 ):
     """
-    #! don't raise exception and hit 298/299
-
-    #! make sure this test is good
-
-    #! figure out msgtype
+    Tests that the msgtype and queue_name reflect what is in the broker message labels if
+    if it is for a device.
     """
     broker = await test_matrix_broker()
 
@@ -861,20 +853,27 @@ async def test_matrix_broker_kick_device_queue_valid_device_name(
         "queue": "device",
         "device": "test device"
     }
+    msgtype = broker.device_queue.task_types.device_task(test_broker_message.labels["device"])
 
     test_client = FractalAsyncClient(
         homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
         access_token=os.environ["MATRIX_ACCESS_TOKEN"],
     )
 
-    # kick task to replication queue
+    # kick task 
     with patch('taskiq_matrix.matrix_broker.send_message', new=AsyncMock()) as mock_send_message:
         with patch(
             "taskiq_matrix.matrix_broker.FractalAsyncClient", return_value=test_client
         ):
             await broker.kick(test_broker_message)
-    # mock_send_message.assert_called_once_with(
-    #     test_client,
-    #     test_broker_message.message,
 
-    # )
+    # verify the message sent
+    mock_send_message.assert_called_once_with(
+        test_client,
+        broker.room_id,
+        test_broker_message.message,
+        msgtype=msgtype,
+        task_id=test_broker_message.task_id,
+        queue='device'
+    )
+
