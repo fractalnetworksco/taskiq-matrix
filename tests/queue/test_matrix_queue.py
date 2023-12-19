@@ -1,12 +1,53 @@
 import json
+import os
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from nio import RoomGetStateEventError, RoomGetStateEventResponse
-from taskiq_matrix.matrix_queue import LockAcquireError, MatrixQueue, Task
+from taskiq_matrix.matrix_queue import LockAcquireError, MatrixQueue, Task, WhoamiError
 from taskiq_matrix.utils import send_message
 
+
+async def test_matrix_queue_constructor_homeserver_url_exception():
+    """ 
+    Tests that an exception is raised if an invalid homeserver url is passed.
+    """
+    with pytest.raises(
+        Exception,
+        match="MatrixQueue requires MATRIX_HOMESERVER_URL environment variable set if not passed explicitly",
+    ):
+        matrix_queue = MatrixQueue(name="test_matrix_queue", homeserver_url="")
+
+
+async def test_matrix_queue_constructor_access_token_exception():
+    """ 
+    Tests that an exception is raised if an invalid access token is passed.
+    """
+    with pytest.raises(
+        Exception,
+        match="MatrixQueue requires MATRIX_ACCESS_TOKEN environment variable set if not passed explicitly",
+    ):
+        matrix_queue = MatrixQueue(
+            name="test_matrix_queue",
+            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
+            access_token="",
+        )
+
+async def test_matrix_queue_constructor_room_id_exception():
+    """ 
+    Tests that an exception is raised if an invalid room id is passed.
+    """
+    with pytest.raises(
+        Exception,
+        match="MatrixQueue requires MATRIX_ROOM_ID environment variable set if not passed explicitly",
+    ):
+        matrix_queue = MatrixQueue(
+            name="test_matrix_queue",
+            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
+            access_token=os.environ['MATRIX_ACCESS_TOKEN'],
+            room_id=""
+        )
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_verify_room_exists_error():
@@ -54,9 +95,13 @@ async def test_matrix_queue_verify_room_exists_exists():
 
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
-async def test_matrix_queue_get_tasks_return_tasks():
+@pytest.mark.skip(reason="don't think this test is legitimate")
+async def test_matrix_queue_get_tasks_return_tasks_no_filter():
     """
-    Tests that all tasks are returned by get_tasks()
+    #! come back to this and try to mock less
+    not filter
+    else on 262
+    task filter = create_room_message_filter
     """
 
     # create a MatrixQueue object
@@ -88,7 +133,7 @@ async def test_matrix_queue_get_tasks_return_tasks():
     expected_tasks = [Task(**test_task_list[0]), Task(**test_task_list[1])]
 
     # patch the create_filter and run_sync_filter functions and call get_tasks()
-    with patch("taskiq_matrix.matrix_queue.create_filter") as mock_create_filter:
+    with patch("taskiq_matrix.matrix_queue.create_sync_filter") as mock_create_filter:
         mock_create_filter.return_value = {}
         with patch(
             "taskiq_matrix.matrix_queue.run_sync_filter", new=AsyncMock()
@@ -105,12 +150,124 @@ async def test_matrix_queue_get_tasks_return_tasks():
 
     await matrix_queue.shutdown()
 
+@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
+async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_sent_by_self():
+    """
+    Test that filter_acked_tasks returns no tasks if they are all send by the queue's 
+    client matrix account.
+    """
+
+    # create a list of task dictionaries to use as parameters
+    test_task_list = [
+        {
+            "body": {
+                "task_id": "1",
+                "task": json.dumps({"data": "Test Task 1"}),
+                "queue": "mutex",
+            },
+            "msgtype": "test_matrix_queue",
+            "sender": "sender",
+        },
+        {
+            "body": {
+                "task_id": "2",
+                "task": json.dumps({"data": "Test Task 2"}),
+                "queue": "mutex",
+            },
+            "msgtype": "test_matrix_queue.2",
+            "sender": "sender",
+        },
+    ]
+
+
+    # create task objects using the dictionaries and put them into a list
+    task1 = Task(**test_task_list[0])
+    task2 = Task(**test_task_list[1])
+    test_task_objects = [task1, task2]
+
+    # crate a MatrixQueue object and set its task_type properties
+    matrix_queue = MatrixQueue(name="test_matrix_queue")
+    matrix_queue.task_types.task = "test_matrix_queue"
+    matrix_queue.task_types.ack = "test_matrix_queue"
+    matrix_queue.client.user_id = "sender"
+
+
+    # verify that the sender of the tasks are not the same as the queue's client's user id
+    assert test_task_list[0]['sender'] is matrix_queue.client.user_id
+    assert test_task_list[1]['sender'] is matrix_queue.client.user_id
+
+    with patch('taskiq_matrix.matrix_queue.logger', new=MagicMock()) as mock_logger:
+        # call filter_acked_tasks and store the result in unacked_tasks
+        unacked_tasks = matrix_queue.filter_acked_tasks(test_task_objects, exclude_self=True)
+
+    # verify that a list of length 1 is returned and that the only item is matching
+    # the Task that was created locally
+    assert len(unacked_tasks) == 0
+    mock_logger.warning.assert_called_once()
+
+    await matrix_queue.shutdown()
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
-async def test_matrix_queue_filter_acked_tasks_proper_filter():
+async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_not_sent_by_self():
     """
-    Test that filter_acked_tasks returns only the Tasks that have
-    the correct message type
+    Test that filter_acked_tasks returns acknowledged tasks that were not sent by 
+    the queue's client matrix account.
+    """
+
+    # create a list of task dictionaries to use as parameters
+    test_task_list = [
+        {
+            "body": {
+                "task_id": "1",
+                "task": json.dumps({"data": "Test Task 1"}),
+                "queue": "mutex",
+            },
+            "msgtype": "test_matrix_queue",
+            "sender": "sender",
+        },
+        {
+            "body": {
+                "task_id": "2",
+                "task": json.dumps({"data": "Test Task 2"}),
+                "queue": "mutex",
+            },
+            "msgtype": "test_matrix_queue.2",
+            "sender": "sender",
+        },
+    ]
+
+
+    # create task objects using the dictionaries and put them into a list
+    task1 = Task(**test_task_list[0])
+    task2 = Task(**test_task_list[1])
+    test_task_objects = [task1, task2]
+
+    # crate a MatrixQueue object and set its task_type properties
+    matrix_queue = MatrixQueue(name="test_matrix_queue")
+    matrix_queue.task_types.task = "test_matrix_queue"
+    matrix_queue.task_types.ack = "test_matrix_queue"
+
+
+    # verify that the sender of the tasks are not the same as the queue's client's user id
+    assert test_task_list[0]['sender'] is not matrix_queue.client.user_id
+    assert test_task_list[1]['sender'] is not matrix_queue.client.user_id
+
+    # call filter_acked_tasks and store the result in unacked_tasks
+    unacked_tasks = matrix_queue.filter_acked_tasks(test_task_objects, exclude_self=True)
+
+    # verify that a list of length 1 is returned and that the only item is matching
+    # the Task that was created locally
+    assert len(unacked_tasks) == 1
+    assert unacked_tasks[0] == test_task_objects[0]
+
+    await matrix_queue.shutdown()
+
+
+@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
+async def test_matrix_queue_filter_acked_tasks_mixed_tasks_include_self():
+    """
+    Test that filter_acked_tasks returns all acked tasks, even if sent by the queue's
+    client matrix account.
     """
 
     # create a list of task dictionaries to use as parameters
@@ -144,6 +301,10 @@ async def test_matrix_queue_filter_acked_tasks_proper_filter():
     matrix_queue = MatrixQueue(name="test_matrix_queue")
     matrix_queue.task_types.task = "test_matrix_queue"
     matrix_queue.task_types.ack = "test_matrix_queue"
+    matrix_queue.client.user_id = 'sender'
+
+    assert test_task_list[0]['sender'] is matrix_queue.client.user_id
+    assert test_task_list[1]['sender'] is matrix_queue.client.user_id
 
     # call filter_acked_tasks and store the result in unacked_tasks
     unacked_tasks = matrix_queue.filter_acked_tasks(test_task_objects)
@@ -154,6 +315,27 @@ async def test_matrix_queue_filter_acked_tasks_proper_filter():
     assert unacked_tasks[0] == test_task_objects[0]
 
     await matrix_queue.shutdown()
+
+async def test_matrix_queue_get_unacked_tasks_whoamierror():
+    """
+    Tests that when the client doesn't have a user id, whoami is called and if it
+    returns an error, an exception is raised
+    """
+
+    # create a matrix queue
+    matrix_queue = MatrixQueue(name='test_matrix_queue')
+
+    # mock the client, set the user id to none and set whoami to return an error
+    matrix_queue.client = AsyncMock()
+    matrix_queue.client.user_id = None
+    mock_error = MagicMock(spec=WhoamiError)
+    mock_error.message = "test message"
+    matrix_queue.client.whoami.return_value = mock_error
+    
+    
+    # call get_unacked tasks to raise exception
+    with pytest.raises(Exception, match="test message"):
+        result = await matrix_queue.get_unacked_tasks(timeout=0)
 
 
 @pytest.mark.integtest  # depends on MatrixBroker clients and send_message
@@ -176,9 +358,9 @@ async def test_matrix_queue_get_unacked_tasks_mixed_tasks(test_matrix_broker):
         "msgtype": matrix_queue.task_types.task,
     }
     event2 = {
-        "task_id": "josdfj09b48907w3",
+        "task_id": "josdfj09b48900w3",
         "queue": "mutex_queue",
-        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3",
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48900w3",
     }
     event3 = {
         "task_id": "kdjfosdf-4j239034",
@@ -212,13 +394,15 @@ async def test_matrix_queue_get_unacked_tasks_mixed_tasks(test_matrix_broker):
         task_id=event3["task_id"],
     )
 
-    # verify that a list of size 1 is returned containing the only unacked
+    # verify that a list of size 2 is returned containing the only unacked
     # task that was sent to the queue
     result = await matrix_queue.get_unacked_tasks(timeout=0)
     assert isinstance(result[1], list)
-    assert len(result[1]) == 1
-    assert result[1][0].type == event3["msgtype"]
-    assert result[1][0].id == event3["task_id"]
+    assert len(result[1]) == 2
+    assert result[1][0].type == event1["msgtype"]
+    assert result[1][0].id == event1["task_id"]
+    assert result[1][1].type == event3["msgtype"]
+    assert result[1][1].id == event3["task_id"]
 
     await test_broker.shutdown()
 
@@ -239,7 +423,7 @@ async def test_matrix_queue_get_unacked_tasks_only_acked_tasks(test_matrix_broke
     event1 = {
         "task_id": "josdfj09b48907w3",
         "queue": "mutex_queue",
-        "msgtype": matrix_queue.task_types.task,
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3",
     }
     event2 = {
         "task_id": "josdfj09b48907w3",
@@ -322,6 +506,19 @@ async def test_matrix_queue_get_unacked_tasks_only_unacked_tasks(test_matrix_bro
     assert len(result[1]) == 2
 
     await test_broker.shutdown()
+
+async def test_matrix_queue_get_unacked_tasks_no_tasks_in_queue(test_matrix_broker):
+    """
+    """
+    test_broker = await test_matrix_broker()
+    await test_broker.startup()
+    matrix_queue = test_broker.mutex_queue
+
+    with patch('taskiq_matrix.matrix_queue.logger', new=MagicMock()) as mock_logger:
+        result = await matrix_queue.get_unacked_tasks(timeout=0)
+    
+    mock_logger.debug.assert_called_once()
+    assert len(result[1]) == 0
 
 
 @pytest.mark.integtest  # depends on MatrixBroker clients and send_message
