@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -9,10 +9,54 @@ from taskiq_matrix.matrix_result_backend import (
     MatrixResultBackend,
 )
 
-# TODO: move result_backend instantiation into a fixture so that it can be reused
-#       See `conftest.py` for an example. The implementation of the fixture should
-#       be the same as the matrix_client fixture that is in that file.
+async def test_matrix_result_backend_constructor_expire_time_error():
+    """ 
+    Tests that an exception is raised if the expire time that is passed to the 
+    constructor is less than zero
 
+    """
+    with pytest.raises(
+        ExpireTimeMustBeMoreThanZeroError,
+        match="You must select one expire time param and it must be more than zero.",
+    ):
+        test_backend = MatrixResultBackend(result_ex_time=None, result_px_time=-1)
+
+    with pytest.raises(
+        ExpireTimeMustBeMoreThanZeroError,
+        match="You must select one expire time param and it must be more than zero.",
+    ):
+        test_backend = MatrixResultBackend(result_ex_time=-1, result_px_time=None)
+
+    with pytest.raises(
+        ExpireTimeMustBeMoreThanZeroError,
+        match="You must select one expire time param and it must be more than zero.",
+    ):
+        test_backend = MatrixResultBackend(result_ex_time=-1, result_px_time=-1)
+
+async def test_matrix_result_backend_constructor_duplicate_expire_time_error():
+    """ 
+    Tests that an exception is raised if two expire times are passed to the constructor.
+    """
+    with pytest.raises(
+        DuplicateExpireTimeSelectedError,
+        match="Choose either result_ex_time or result_px_time.",
+    ):
+        test_backend = MatrixResultBackend(result_ex_time=1, result_px_time=1)
+
+async def test_matrix_result_backend_shutdown(test_matrix_result_backend):
+    """
+    Tests that calling shutdown closes the result backend's client
+    """
+    test_backend = await test_matrix_result_backend()
+    mock_client = AsyncMock()
+    test_backend.matrix_client = mock_client
+    await test_backend.shutdown()
+
+    mock_client.close.assert_called_once()
+    
+async def test_matrix_restul_backend_set_result_():
+    """
+    """
 
 @pytest.mark.skip(
     reason="The test below this is doing the same thing. So if that one works, then the result backend works"

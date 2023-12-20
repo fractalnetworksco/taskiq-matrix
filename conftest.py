@@ -15,6 +15,7 @@ from taskiq_matrix.matrix_broker import (
     MatrixQueue,
     ReplicatedQueue,
 )
+from taskiq_matrix.matrix_result_backend import MatrixResultBackend
 from taskiq_matrix.matrix_queue import Checkpoint
 
 try:
@@ -51,6 +52,17 @@ def new_matrix_room(matrix_client: AsyncClient):
 
     return create
 
+
+@pytest.fixture(scope="function")
+def test_matrix_result_backend(new_matrix_room):
+    """
+    Creates a MatrixResultBackend object
+    """
+    async def create():
+        room_id = await new_matrix_room()
+        return MatrixResultBackend(room_id=room_id)
+
+    return create
 
 @pytest.fixture(scope="function")
 def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
