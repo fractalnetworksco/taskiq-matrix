@@ -192,24 +192,11 @@ class MatrixQueue:
     def __init__(
         self,
         name: str,
-        homeserver_url: str = os.environ.get("MATRIX_HOMESERVER_URL", ""),
-        access_token: str = os.environ.get("MATRIX_ACCESS_TOKEN", ""),
-        room_id: str = os.environ.get("MATRIX_ROOM_ID", ""),
+        homeserver_url: str,
+        access_token: str,
+        room_id: str,
         device_name: str = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname()),
     ):
-        if not homeserver_url:
-            raise Exception(
-                "MatrixQueue requires MATRIX_HOMESERVER_URL environment variable set if not passed explicitly"
-            )
-        if not access_token:
-            raise Exception(
-                "MatrixQueue requires MATRIX_ACCESS_TOKEN environment variable set if not passed explicitly"
-            )
-        if not room_id:
-            raise Exception(
-                "MatrixQueue requires MATRIX_ROOM_ID environment variable set if not passed explicitly"
-            )
-
         self.client = FractalAsyncClient(
             homeserver_url=homeserver_url, access_token=access_token, room_id=room_id
         )
@@ -486,18 +473,11 @@ class ReplicatedQueue(BroadcastQueue):
     def __init__(
         self,
         name: str,
+        homeserver_url: str,
+        access_token: str,
+        room_id: str,
         *args,
-        homeserver_url: str = os.environ.get("MATRIX_HOMESERVER_URL", ""),
-        access_token: str = os.environ.get("MATRIX_ACCESS_TOKEN", ""),
-        room_id: str = os.environ.get("MATRIX_ROOM_ID", ""),
         **kwargs,
     ):
-        super().__init__(
-            name,
-            *args,
-            homeserver_url=homeserver_url,
-            access_token=access_token,
-            room_id=room_id,
-            **kwargs,
-        )
+        super().__init__(name, homeserver_url, access_token, room_id, *args, **kwargs)
         self.checkpoint.type = f"{self.checkpoint.type}.{self.device_name}"
