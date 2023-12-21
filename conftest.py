@@ -60,7 +60,7 @@ def test_matrix_result_backend(new_matrix_room):
     """
     async def create():
         room_id = await new_matrix_room()
-        return MatrixResultBackend(room_id=room_id)
+        return MatrixResultBackend(homeserver_url=os.environ["MATRIX_HOMESERVER_URL"], access_token=os.environ["MATRIX_ACCESS_TOKEN"], room_id=room_id)
 
     return create
 

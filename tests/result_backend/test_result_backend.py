@@ -1,5 +1,8 @@
-from unittest.mock import patch, AsyncMock
+import os
+import pickle
+from unittest.mock import patch, AsyncMock, MagicMock
 from uuid import uuid4
+from base64 import b64decode, b64encode
 
 import pytest
 from taskiq.result import TaskiqResult
@@ -7,6 +10,7 @@ from taskiq_matrix.exceptions import DuplicateExpireTimeSelectedError
 from taskiq_matrix.matrix_result_backend import (
     ExpireTimeMustBeMoreThanZeroError,
     MatrixResultBackend,
+    RoomMessagesError,
 )
 
 async def test_matrix_result_backend_constructor_expire_time_error():
@@ -19,19 +23,37 @@ async def test_matrix_result_backend_constructor_expire_time_error():
         ExpireTimeMustBeMoreThanZeroError,
         match="You must select one expire time param and it must be more than zero.",
     ):
-        test_backend = MatrixResultBackend(result_ex_time=None, result_px_time=-1)
+        test_backend = MatrixResultBackend(
+            homeserver_url=os.environ['MATRIX_HOMESERVER_URL'],
+            access_token=os.environ['MATRIX_ACCESS_TOKEN'],
+            room_id=os.environ['MATRIX_ROOM_ID'],
+            result_ex_time=None,
+            result_px_time=-1
+        )
 
     with pytest.raises(
         ExpireTimeMustBeMoreThanZeroError,
         match="You must select one expire time param and it must be more than zero.",
     ):
-        test_backend = MatrixResultBackend(result_ex_time=-1, result_px_time=None)
+        test_backend = MatrixResultBackend(
+            homeserver_url=os.environ['MATRIX_HOMESERVER_URL'],
+            access_token=os.environ['MATRIX_ACCESS_TOKEN'],
+            room_id=os.environ['MATRIX_ROOM_ID'],
+            result_ex_time=-1,
+            result_px_time=None
+        )
 
     with pytest.raises(
         ExpireTimeMustBeMoreThanZeroError,
         match="You must select one expire time param and it must be more than zero.",
     ):
-        test_backend = MatrixResultBackend(result_ex_time=-1, result_px_time=-1)
+        test_backend = MatrixResultBackend(
+            homeserver_url=os.environ['MATRIX_HOMESERVER_URL'],
+            access_token=os.environ['MATRIX_ACCESS_TOKEN'],
+            room_id=os.environ['MATRIX_ROOM_ID'],
+            result_ex_time=-1,
+            result_px_time=-1
+        )
 
 async def test_matrix_result_backend_constructor_duplicate_expire_time_error():
     """ 
@@ -41,7 +63,13 @@ async def test_matrix_result_backend_constructor_duplicate_expire_time_error():
         DuplicateExpireTimeSelectedError,
         match="Choose either result_ex_time or result_px_time.",
     ):
-        test_backend = MatrixResultBackend(result_ex_time=1, result_px_time=1)
+        test_backend = MatrixResultBackend(
+            homeserver_url=os.environ['MATRIX_HOMESERVER_URL'],
+            access_token=os.environ['MATRIX_ACCESS_TOKEN'],
+            room_id=os.environ['MATRIX_ROOM_ID'],
+            result_ex_time=1,
+            result_px_time=1
+        )
 
 async def test_matrix_result_backend_shutdown(test_matrix_result_backend):
     """
@@ -54,161 +82,260 @@ async def test_matrix_result_backend_shutdown(test_matrix_result_backend):
 
     mock_client.close.assert_called_once()
     
-async def test_matrix_restul_backend_set_result_():
+async def test_matrix_result_backend_set_result_ex_time_case(test_matrix_result_backend):
     """
     """
+    test_backend = await test_matrix_result_backend()
+    # set result_ex_time to 1 for test purposes
+    test_backend.result_ex_time = 1
 
-@pytest.mark.skip(
-    reason="The test below this is doing the same thing. So if that one works, then the result backend works"
-)
-async def test_result_backend_works(new_matrix_room):
-    """
-    Ensure that only one instance of a lock can be acquired for a certain key.
-    """
-    # create a task_id
-    task_id = str(uuid4())
-
-    # create a MatrixResultBackend object
-    room_id = await new_matrix_room()
-    result_backend = MatrixResultBackend(room_id=room_id)
-
-    # set a task
+    test_task_id = str(uuid4())
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
 
-    # assign the task to the MatrixResultBackend object
-    await result_backend.set_result(task_id, result)
+    assert result.labels == {}
 
-    # check if the result is ready and available to the user
-    assert await result_backend.is_result_ready(task_id)
+    with patch('taskiq_matrix.matrix_result_backend.send_message', new=AsyncMock()) as mock_send_message:
+        await test_backend.set_result(test_task_id, result)
 
-    result = await result_backend.get_result(task_id)
-    assert isinstance(result, TaskiqResult)
-    assert result.return_value == "chicken"
+    comparison_message = {
+        "name": test_task_id,
+        "value": b64encode(pickle.dumps(result)).decode(),
+        "ex": test_backend.result_ex_time
+    }
 
-    await result_backend.shutdown()
+    mock_send_message.assert_called_with(
+        test_backend.matrix_client,
+        test_backend.room,
+        comparison_message,
+        msgtype=f"taskiq.result.{test_task_id}"
+    )
 
-
-async def test_is_result_ready(new_matrix_room):
+    assert result.labels == {'device': test_backend.device_name}
+    
+async def test_matrix_result_backend_set_result_px_time_case(test_matrix_result_backend):
     """
-    Test if the result from MaxtrixResultBacken is available to the user
     """
-    # create a task_id
-    task_id = str(uuid4())
+    test_backend = await test_matrix_result_backend()
+    # set result_ex_time to 1 for test purposes
+    test_backend.result_px_time = 1
 
-    # patch environment to use the new room
-    room_id = await new_matrix_room()
-
-    # create a MatrixResultBackend object
-    room_id = await new_matrix_room()
-    result_backend = MatrixResultBackend(room_id=room_id)
-
-    # check if the result is ready before giving a task
-    assert await result_backend.is_result_ready(task_id=task_id) == False
-
-    since_token_before = result_backend.matrix_client.next_batch
-
-    # sets a task and returns True
+    test_task_id = str(uuid4())
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
-    await result_backend.set_result(task_id=task_id, result=result)
-    result_backend.matrix_client.next_batch = since_token_before
-    assert await result_backend.is_result_ready(task_id=task_id)
 
-    await result_backend.shutdown()
+    assert result.labels == {}
 
+    with patch('taskiq_matrix.matrix_result_backend.send_message', new=AsyncMock()) as mock_send_message:
+        await test_backend.set_result(test_task_id, result)
 
-async def test_get_result_no_result(new_matrix_room):
+    comparison_message = {
+        "name": test_task_id,
+        "value": b64encode(pickle.dumps(result)).decode(),
+        "px": test_backend.result_px_time
+    }
+
+    mock_send_message.assert_called_with(
+        test_backend.matrix_client,
+        test_backend.room,
+        comparison_message,
+        msgtype=f"taskiq.result.{test_task_id}"
+    )
+
+    assert result.labels == {'device': test_backend.device_name}
+
+async def test_matrix_result_backend_is_result_ready_room_message_error(test_matrix_result_backend):
     """
-    Test error
+    """
+
+    test_backend = await test_matrix_result_backend()
+    test_task_id = str(uuid4())
+    test_backend.next_batch = None
+    test_backend.matrix_client.next_batch = None
+
+    with patch('taskiq_matrix.matrix_result_backend.FractalAsyncClient.room_messages', return_value=AsyncMock(spec=RoomMessagesError, start="test start")):
+        with patch('taskiq_matrix.matrix_result_backend.run_sync_filter', new=AsyncMock(return_value={})) as mock_run_sync_filter:
+            await test_backend.is_result_ready(test_task_id)
+    
+    assert test_backend.next_batch == None
+    assert test_backend.matrix_client.next_batch == None
+
+async def test_matrix_result_backend_is_result_ready_room_message_error_next_batch_updates(test_matrix_result_backend):
+    """
+    NOTE The client is the only object that get's its next batch updated in this case.
+    """
+
+    test_backend = await test_matrix_result_backend()
+    test_task_id = str(uuid4())
+    test_backend.next_batch = None
+    test_backend.matrix_client.next_batch = None
+
+    with patch('taskiq_matrix.matrix_result_backend.FractalAsyncClient.room_messages', return_value=AsyncMock(spec=RoomMessagesError, start="test start")):
+        await test_backend.is_result_ready(test_task_id)
+    
+    assert test_backend.next_batch == None
+    assert test_backend.matrix_client.next_batch != None
+
+
+async def test_matrix_result_backend_is_result_ready_result_is_ready(test_matrix_result_backend):
+    """
+    #! find out how to return true
+    """
+    test_backend = await test_matrix_result_backend()
+    test_task_id = str(uuid4())
+    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    await test_backend.set_result(test_task_id, result)
+    result = await test_backend.is_result_ready(test_task_id)
+    print('result====', result)
+
+
+async def test_matrix_result_backend_is_result_ready_result_not_ready(test_matrix_result_backend):
+    """
+    """
+
+async def test_matrix_result_backend_get_result_decode_error_loading_result_from_task(test_matrix_result_backend):
+    """
     """
     # create a task_id
     task_id = str(uuid4())
 
     # create a MatrixResultBackend object
-    room_id = await new_matrix_room()
-    result_backend = MatrixResultBackend(room_id=room_id)
-
-    with pytest.raises(Exception):
-        assert await result_backend.get_result(task_id=task_id, with_logs=False)
-
-    await result_backend.shutdown()
-
-
-async def test_get_result_decode_error(new_matrix_room):
-    """
-    Test decode error exception by setting with_logs to false
-    """
-    # create a task_id
-    task_id = str(uuid4())
-
-    # create a MatrixResultBackend object
-    room_id = await new_matrix_room()
-    result_backend = MatrixResultBackend(room_id=room_id)
+    result_backend = await test_matrix_result_backend()
 
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
 
     # set a result for the backend object
     await result_backend.set_result(task_id=task_id, result=result)
 
-    since_token_before = result_backend.matrix_client.next_batch
     # assign the task to the MatrixResultBackend object without logs to raise an exception
     with patch("taskiq_matrix.matrix_result_backend.b64decode", side_effect=Exception):
-        with pytest.raises(Exception):
-            await result_backend.get_result(task_id=task_id, with_logs=False)
+        with patch('taskiq_matrix.matrix_result_backend.logger', new=MagicMock()) as mock_logger:
+            with pytest.raises(Exception) as e:
+                await result_backend.get_result(task_id=task_id)
 
-    result_backend.matrix_client.next_batch = since_token_before
-    with patch("pickle.loads", side_effect=Exception):
-        with pytest.raises(Exception):
-            await result_backend.get_result(task_id=task_id, with_logs=False)
+            call_args = mock_logger.error.mock_calls[0][1]  
+            logged_string = call_args[0]
+
+        assert "Error loading result from returned task" in logged_string
 
     await result_backend.shutdown()
 
-
-@pytest.mark.skip(
-    reason="Not finished. Verify that the ex time and px time are included in the message respectively"
-)
-async def test_set_result_ex_px(new_matrix_room):
+async def test_matrix_result_backend_get_result_decode_error_fetching_result_from_matrix(test_matrix_result_backend):
     """
-    Test manually setting px_time and ex_time
     """
     # create a task_id
     task_id = str(uuid4())
 
     # create a MatrixResultBackend object
-    room_id = await new_matrix_room()
-    result_backend = MatrixResultBackend(result_ex_time=1, room_id=room_id)
+    result_backend = await test_matrix_result_backend()
+
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+
+    # set a result for the backend object
     await result_backend.set_result(task_id=task_id, result=result)
 
-    # get the result out of matrix and verify that ex is in the message body
+    with patch('taskiq_matrix.matrix_result_backend.run_sync_filter', new=AsyncMock(return_value=None)):
+        with patch('taskiq_matrix.matrix_result_backend.logger', new=MagicMock()) as mock_logger:
+            with pytest.raises(Exception) as e:
+                await result_backend.get_result(task_id=task_id)
 
-    # set a px time of 1
-    result_backend = MatrixResultBackend(result_px_time=1)
-    await result_backend.set_result(task_id=task_id, result=result)
+            call_args = mock_logger.error.mock_calls[0][1]  
+            logged_string = call_args[0]
 
-    # get the result out of matrix and verify that px is in the message body
+        assert "Error getting task result from Matrix" in logged_string
 
-
-async def test_constructor_duplicate_time():
+async def test_matrix_result_backend_get_result_decode_error_loading_as_taskiq_result(test_matrix_result_backend):
     """
-    Test sending both px_time and ex_time to the MatrixResultBackend
-    constructor to raise an exception
     """
     # create a task_id
     task_id = str(uuid4())
 
-    # set two different px and ex times to raise an exception
-    with pytest.raises(DuplicateExpireTimeSelectedError):
-        result_backend = MatrixResultBackend(result_ex_time=10, result_px_time=100)
+    # create a MatrixResultBackend object
+    result_backend = await test_matrix_result_backend()
 
+    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
 
-async def test_constructor_ex_px_gt_zero():
+    # set a result for the backend object
+    await result_backend.set_result(task_id=task_id, result=result)
+
+    with patch("pickle.loads", side_effect=Exception):
+        with patch('taskiq_matrix.matrix_result_backend.logger', new=MagicMock()) as mock_logger:
+            with pytest.raises(Exception):
+                await result_backend.get_result(task_id=task_id)
+
+            call_args = mock_logger.error.mock_calls[0][1]  
+            logged_string = call_args[0]
+
+        assert "Error loading result as taskiq result:" in logged_string
+
+async def test_matrix_result_backend_get_result_not_with_logs(test_matrix_result_backend):
     """
-    Test raising an exception by passing a negative
-    ex_time in the MatrixResultBackend constructor
+    clears the log in the taskiqresult object
     """
     # create a task_id
     task_id = str(uuid4())
 
-    # set ex_time to a negative number to raise an exception
-    with pytest.raises(ExpireTimeMustBeMoreThanZeroError):
-        result_backend = MatrixResultBackend(result_ex_time=-10, result_px_time=100)
+    # create a MatrixResultBackend object
+    result_backend = await test_matrix_result_backend()
+
+    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result.log = "test log"
+
+    # set a result for the backend object
+    await result_backend.set_result(task_id=task_id, result=result)
+
+    taskiq_result_from_get_result = await result_backend.get_result(task_id=task_id, with_logs=False)
+
+    assert taskiq_result_from_get_result.log is None
+
+async def test_matrix_result_backend_get_result_with_logs(test_matrix_result_backend):
+    """
+    preserves the log in the taskiqresult object
+    """
+    # create a task_id
+    task_id = str(uuid4())
+
+    # create a MatrixResultBackend object
+    result_backend = await test_matrix_result_backend()
+
+    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result.log = "test log"
+
+    # set a result for the backend object
+    await result_backend.set_result(task_id=task_id, result=result)
+
+    taskiq_result_from_get_result = await result_backend.get_result(task_id=task_id, with_logs=True)
+
+    assert taskiq_result_from_get_result.log == "test log"
+
+async def test_matrix_result_backend_get_result_result_available(test_matrix_result_backend):
+    """
+    """
+    # create a task_id
+    task_id = str(uuid4())
+
+    # create a MatrixResultBackend object
+    result_backend = await test_matrix_result_backend()
+
+    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+
+    await result_backend.set_result(task_id=task_id, result=result)
+
+    taskiq_result_from_get_result = await result_backend.get_result(task_id=task_id, with_logs=True)
+    assert taskiq_result_from_get_result == result
+
+async def test_matrix_result_backend_get_result_no_result_set(test_matrix_result_backend):
+    """
+    """
+    # create a MatrixResultBackend object
+    result_backend = await test_matrix_result_backend()
+
+    # create a task_id
+    task_id = str(uuid4())
+
+    with patch('taskiq_matrix.matrix_result_backend.logger', new=MagicMock()) as mock_logger:
+        with pytest.raises(Exception):
+            taskiq_result_from_get_result = await result_backend.get_result(task_id=task_id, with_logs=True)
+
+        call_args = mock_logger.error.mock_calls[0][1]  
+        logged_string = call_args[0]
+
+    assert "Error getting task result from Matrix" in logged_string
