@@ -16,7 +16,6 @@ from .exceptions import (
     LockAcquireError,
     ScheduledTaskRequiresTaskIdLabel,
 )
-from .filters import EMPTY_FILTER, run_sync_filter
 from .lock import MatrixLock
 from .matrix_queue import BroadcastQueue, MatrixQueue, ReplicatedQueue, Task
 from .matrix_result_backend import MatrixResultBackend
@@ -36,12 +35,14 @@ class MatrixBroker(AsyncBroker):
     mutex_queue: MatrixQueue
     replication_queue: ReplicatedQueue
     result_backend: MatrixResultBackend
+    room_id: str
+    homeserver_url: str
+    access_token: str
 
     def __init__(
         self,
         result_backend: Optional[AsyncResultBackend] = None,
         task_id_generator: Any = None,
-        room_id: Optional[str] = None,
     ) -> None:
         """
         A taskiq broker backed by the Matrix protocol.
@@ -55,10 +56,6 @@ class MatrixBroker(AsyncBroker):
         - mutex_queue: a queue of tasks that should be run by any (only one)
         device in a group
         - replication_queue: a queue of tasks that should be run by each device
-        Requires the following environment variables to be set:
-        - MATRIX_HOMESERVER_URL
-        - MATRIX_ACCESS_TOKEN
-        - MATRIX_ROOM_ID (if room_id not provided as an argument)
 
         NOTE: Rate limiting for the configured user should be disabled:
         `insert into ratelimit_override values ("@mjolnir:my-homeserver.chat", 0, 0);`
@@ -67,25 +64,45 @@ class MatrixBroker(AsyncBroker):
         TODO: Figure out how to dynamically register queues.
         """
         super().__init__(result_backend=result_backend, task_id_generator=task_id_generator)
-        try:
-            os.environ["MATRIX_HOMESERVER_URL"]
-            os.environ["MATRIX_ACCESS_TOKEN"]
-            self.room_id = room_id
-        except KeyError as e:
-            raise KeyError(f"Missing required environment variable: {e}")
 
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
         self.worker_id = uuid4().hex
 
-    def _init_queues(self, room_id: Optional[str] = None):
-        if not room_id:
-            room_id = self.room_id or os.environ["MATRIX_ROOM_ID"]
+    def with_matrix_config(self, room_id: str, homeserver_url: str, access_token: str) -> Self:
+        self.room_id = room_id
+        self.homeserver_url = homeserver_url
+        self.access_token = access_token
+        return self
+
+    def _init_queues(self):
+        if not all([self.room_id, self.homeserver_url, self.access_token]):
+            raise Exception("Matrix config must be set with with_matrix_config.")
 
         if not hasattr(self, "mutex_queue"):
-            self.mutex_queue = MatrixQueue("mutex", room_id=room_id)
-            self.device_queue = MatrixQueue(f"device.{self.device_name}", room_id=room_id)
-            self.broadcast_queue = BroadcastQueue("broadcast", room_id=room_id)
-            self.replication_queue = ReplicatedQueue("replication", room_id=room_id)
+            self.mutex_queue = MatrixQueue(
+                "mutex",
+                homeserver_url=self.homeserver_url,
+                access_token=self.access_token,
+                room_id=self.room_id,
+            )
+            self.device_queue = MatrixQueue(
+                f"device.{self.device_name}",
+                homeserver_url=self.homeserver_url,
+                access_token=self.access_token,
+                room_id=self.room_id,
+            )
+            self.broadcast_queue = BroadcastQueue(
+                "broadcast",
+                homeserver_url=self.homeserver_url,
+                access_token=self.access_token,
+                room_id=self.room_id,
+            )
+            self.replication_queue = ReplicatedQueue(
+                "replication",
+                homeserver_url=self.homeserver_url,
+                access_token=self.access_token,
+                room_id=self.room_id,
+            )
 
     def with_result_backend(self, result_backend: AsyncResultBackend[_T]) -> Self:
         if not isinstance(result_backend, MatrixResultBackend):
@@ -265,7 +282,7 @@ class MatrixBroker(AsyncBroker):
 
         room_id = message.labels.get("room_id")
 
-        self._init_queues(room_id=room_id)
+        self._init_queues()
 
         queue_name = message.labels.get("queue", "mutex")
         device_name = message.labels.get("device")
@@ -288,8 +305,8 @@ class MatrixBroker(AsyncBroker):
         # use a fresh new client here because kicking a task can sometimes be from
         # an ephemeral event loop
         client = FractalAsyncClient(
-            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
-            access_token=os.environ["MATRIX_ACCESS_TOKEN"],
+            homeserver_url=self.homeserver_url,
+            access_token=self.access_token,
         )
 
         if queue == self.device_queue:
