@@ -75,7 +75,10 @@ class MatrixBroker(AsyncBroker):
         return self
 
     def _init_queues(self):
-        if not all([self.room_id, self.homeserver_url, self.access_token]):
+        try:
+            if not all([self.room_id, self.homeserver_url, self.access_token]):
+                raise Exception("Matrix config must be set with with_matrix_config.")
+        except:
             raise Exception("Matrix config must be set with with_matrix_config.")
 
         if not hasattr(self, "mutex_queue"):

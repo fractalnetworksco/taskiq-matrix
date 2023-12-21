@@ -260,8 +260,8 @@ class MatrixQueue:
             task_events, end = await run_room_message_filter(
                 self.client, self.room_id, task_filter, since=next_batch
             )
-            print('task filter======', task_filter)
-            print('task events=====', len(task_events[self.room_id]))
+            # print('task filter======', task_filter)
+            # print('task events=====', len(task_events[self.room_id]))
             if not end:
                 self.caught_up = True
                 # finished processing all events in the room, so use the sync API
