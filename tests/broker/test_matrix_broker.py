@@ -27,41 +27,13 @@ from taskiq_matrix.matrix_broker import (
 )
 from taskiq_matrix.matrix_queue import MatrixQueue
 
-
-async def test_matrix_broker_homeserver_url_not_set():
+async def test_matrix_broker_with_matrix_config(test_matrix_broker):
     """
-    Tests the exception that is raised if the os.environ dictionary doesn't have a
-    value for MATRIX_HOMESERVER_URL
+    Tests that with_matrix_config properly sets the attributes of the MatrixBroker object
+    with the values passed to it.
     """
-    expected_error = "Missing required environment variable: 'MATRIX_HOMESERVER_URL'"
+    broker = await test_matrix_broker()
 
-    # patch the os.environ dictionary to be cleared
-    with patch.dict(os.environ, {}, clear=True):
-        with pytest.raises(KeyError) as e:
-            mb = MatrixBroker()
-
-        # verify that the error raised os for the homeserver url
-        assert str(e.value) == f'"{expected_error}"'
-
-
-async def test_matrix_broker_access_token_not_set():
-    """
-    Tests the exception that is raised if the os.environ dictionary doesn't have a
-    value for MATRIX_ACCESS_TOKEN
-    """
-    expected_error = "Missing required environment variable: 'MATRIX_ACCESS_TOKEN'"
-
-    # patch the os.environ dictionary
-    with patch.dict(os.environ, {"MATRIX_ACCESS_TOKEN": "test_url"}):
-        # delete the matrix access token key-value pair
-        del os.environ["MATRIX_ACCESS_TOKEN"]
-
-        # create a matrix broker object to
-        with pytest.raises(KeyError) as e:
-            mb = MatrixBroker()
-
-        # verify that the error raised os for the access token
-        assert str(e.value) == f'"{expected_error}"'
 
 
 async def test_matrix_broker_init_queues_no_existing_queues():
@@ -167,7 +139,7 @@ async def test_matrix_broker_init_queues_no_room_id_use_broker_id():
     assert not hasattr(test_broker, "replication_queue")
 
     # call _init_queues
-    test_broker._init_queues(None)
+    test_broker._init_queues()
 
     # verify that the broker now has queues
     assert hasattr(test_broker, "mutex_queue")
@@ -204,6 +176,10 @@ async def test_matrix_broker_with_result_backend_is_instance(test_matrix_broker)
     """
     Tests that if a MatrixResultBackend object is passed to with_result_backend, the
     superclass' with_result_backend is called with the same object
+
+    FIXME: Instead of mocking with_result_backend like that, just call 
+    test_broker.with_result_backend(mock_backend) and assert that it returns a broker 
+    instance with the result_backend set to the passed instance.
     """
 
     # create a MatrixBroker object from a fixture

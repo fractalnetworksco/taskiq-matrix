@@ -67,7 +67,7 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
         broker.room_id = room_id
 
         # use room_id for the queues
-        broker._init_queues(room_id=room_id)
+        broker._init_queues()
 
         return broker
 
