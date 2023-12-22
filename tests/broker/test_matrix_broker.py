@@ -27,14 +27,34 @@ from taskiq_matrix.matrix_broker import (
 )
 from taskiq_matrix.matrix_queue import MatrixQueue
 
-async def test_matrix_broker_with_matrix_config(test_matrix_broker):
+async def test_matrix_broker_with_matrix_config():
     """
     Tests that with_matrix_config properly sets the attributes of the MatrixBroker object
     with the values passed to it.
     """
-    broker = await test_matrix_broker()
+    
+    # create matrix config variables
+    test_room_id = "test room id"
+    test_homeserver_url = "test homeserver url"
+    test_access_token = "test access token"
 
+    # create a MatrixBroker object
+    test_broker = MatrixBroker()
 
+    # verify that the broker has a device name as a control 
+    assert hasattr(test_broker, "device_name")
+    # verify that it doesn not have any matrix config attributes
+    assert not hasattr(test_broker, "room_id")
+    assert not hasattr(test_broker, "homeserver_url")
+    assert not hasattr(test_broker, "access_token")
+
+    # call with_matrix_config
+    test_broker.with_matrix_config(test_room_id, test_homeserver_url, test_access_token)
+
+    # verify that the attributes were set
+    assert hasattr(test_broker, "room_id") and test_broker.room_id == test_room_id
+    assert hasattr(test_broker, "homeserver_url") and test_broker.homeserver_url == test_homeserver_url
+    assert hasattr(test_broker, "access_token") and test_broker.access_token == test_access_token
 
 async def test_matrix_broker_init_queues_no_existing_queues():
     """
