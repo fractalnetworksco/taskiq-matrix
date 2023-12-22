@@ -3,11 +3,12 @@ import logging
 import os
 import socket
 from functools import partial
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
     MessageDirection,
+    RoomContextError,
     RoomGetStateEventError,
     RoomMessagesResponse,
     RoomPutStateError,
@@ -16,7 +17,12 @@ from nio import (
 from taskiq import AckableMessage
 
 from .exceptions import CheckpointGetOrInitError, LockAcquireError, TaskAlreadyAcked
-from .filters import create_filter, run_sync_filter
+from .filters import (
+    create_room_message_filter,
+    create_sync_filter,
+    run_room_message_filter,
+    run_sync_filter,
+)
 from .lock import MatrixLock
 from .utils import send_message
 
@@ -186,24 +192,11 @@ class MatrixQueue:
     def __init__(
         self,
         name: str,
-        homeserver_url: str = os.environ.get("MATRIX_HOMESERVER_URL", ""),
-        access_token: str = os.environ.get("MATRIX_ACCESS_TOKEN", ""),
-        room_id: str = os.environ.get("MATRIX_ROOM_ID", ""),
+        homeserver_url: str,
+        access_token: str,
+        room_id: str,
         device_name: str = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname()),
     ):
-        if not homeserver_url:
-            raise Exception(
-                "MatrixQueue requires MATRIX_HOMESERVER_URL environment variable set if not passed explicitly"
-            )
-        if not access_token:
-            raise Exception(
-                "MatrixQueue requires MATRIX_ACCESS_TOKEN environment variable set if not passed explicitly"
-            )
-        if not room_id:
-            raise Exception(
-                "MatrixQueue requires MATRIX_ROOM_ID environment variable set if not passed explicitly"
-            )
-
         self.client = FractalAsyncClient(
             homeserver_url=homeserver_url, access_token=access_token, room_id=room_id
         )
@@ -212,6 +205,9 @@ class MatrixQueue:
         self.task_types = TaskTypes(name)
         self.device_name = device_name
         self.room_id = room_id
+        # Boolean that determines whether the queue is caught up with the room's timeline
+        # This is used to determine whether to use the room_messages API or the sync API
+        self.caught_up = False
 
     async def verify_room_exists(self) -> None:
         """
@@ -223,7 +219,10 @@ class MatrixQueue:
             raise Exception(f"Matrix room {self.room_id} not found: {res.message}")
 
     async def get_tasks(
-        self, timeout: int = 30000, since_token: Optional[str] = None
+        self,
+        timeout: int = 30000,
+        since_token: Optional[str] = None,
+        task_filter: Optional[Dict[str, Any]] = None,
     ) -> list[Task]:
         """
         Returns a list of tasks and acks.
@@ -232,19 +231,51 @@ class MatrixQueue:
             timeout (int): The timeout to use when fetching tasks.
             since_token (str): The next batch token to use when fetching tasks.
                                Defaults to the current checkpoint of the broker.
+            task_fitler (dict): A filter to use when fetching tasks. Defaults to
+                                a filter that fetches all tasks and acks for the
+                                queue.
 
         Returns:
             A list of tasks and acks.
         """
         next_batch = since_token or self.checkpoint.since_token
 
-        task_filter = create_filter(
-            self.room_id,
-            types=[self.task_types.task, f"{self.task_types.ack}.*"],
-        )
-        task_events = await run_sync_filter(
-            self.client, task_filter, timeout=timeout, since=next_batch
-        )
+        if not task_filter:
+            if self.caught_up:
+                task_filter = create_sync_filter(
+                    self.room_id,
+                    types=[self.task_types.task, f"{self.task_types.ack}.*"],
+                )
+            else:
+                task_filter = create_room_message_filter(
+                    self.room_id,
+                    types=[self.task_types.task, f"{self.task_types.ack}.*"],
+                )
+
+        if self.caught_up:
+            task_events = await run_sync_filter(
+                self.client, task_filter, timeout=timeout, since=next_batch
+            )
+        else:
+            task_events, end = await run_room_message_filter(
+                self.client, self.room_id, task_filter, since=next_batch
+            )
+            if not end:
+                self.caught_up = True
+                # finished processing all events in the room, so use the sync API
+                # to get new events from now on
+                self.client.next_batch = await self.client.get_latest_sync_token(self.room_id)
+                logger.info(
+                    f"Caught up - Updating checkpoint in room to: {self.client.next_batch}"
+                )
+                await self.checkpoint.put_checkpoint_state(self.client.next_batch)
+                return await self.get_tasks(timeout=timeout)
+            else:
+                logger.info(f"Still catching up - Updating checkpoint to {end}")
+                self.checkpoint.since_token = end
+
+        # acks should be a separate type
+        # tasks should only be tasks
         tasks = [Task(**task) for task in task_events.get(self.room_id, [])]
         return tasks
 
@@ -311,6 +342,9 @@ class MatrixQueue:
 
         tasks = await self.get_tasks(timeout=timeout, since_token=self.checkpoint.since_token)
         unacked = self.filter_acked_tasks(tasks, exclude_self=exclude_self)
+        if not unacked:
+            logger.debug(f"No unacked tasks found for queue: {self.name}")
+
         return self.name, unacked
 
     async def all_tasks_acked(self) -> bool:
@@ -331,7 +365,9 @@ class MatrixQueue:
         expected_ack = f"{queue_ack_type}.{task_id}"
 
         # attempt to fetch the given task_id's ack from the room
-        task_filter = create_filter(self.room_id, types=[expected_ack])
+        # FIXME: Hard to know how far back to look back. What if the ack
+        # is 1001 events back? We would miss it.
+        task_filter = create_sync_filter(self.room_id, types=[expected_ack], limit=1000)
         tasks = await run_sync_filter(self.client, task_filter, timeout=0, since=next_batch)
 
         # if anything for the room was returned, then the task was acked
@@ -359,7 +395,12 @@ class MatrixQueue:
             queue=self.name,
         )
 
-    async def yield_task(self, task: Task) -> AckableMessage:
+    async def yield_task(
+        self,
+        task: Task,
+        ignore_acks: bool = False,
+        lock: bool = True,
+    ) -> Union[AckableMessage, bytes]:
         """
         Attempts to lock a task and yield it to a worker. If the lock is
         acquired and the task has been acked since the lock was acquired, then
@@ -375,11 +416,13 @@ class MatrixQueue:
             LockAcquireError: If the lock could not be acquired.
             TaskAlreadyAcked: If the task has been acked since the lock was acquired.
         """
-        async with MatrixLock(room_id=self.room_id).lock(f"{self.task_types.lock}.{task.id}"):
+
+        async def _yield_task():
             # ensure that task has not been acked since lock was acquired
-            acked = await self.task_is_acked(task.id)
-            if acked:
-                raise TaskAlreadyAcked(task.id)
+            if not ignore_acks:
+                acked = await self.task_is_acked(task.id)
+                if acked:
+                    raise TaskAlreadyAcked(task.id)
 
             # encode task data
             task_data = json.dumps(task.data).encode("utf-8")
@@ -387,10 +430,19 @@ class MatrixQueue:
             logger.info(
                 f"Yielding message {task.data} for task {task.id} to worker {self.device_name}",
             )
+            if ignore_acks:
+                return task_data
+
             return AckableMessage(
                 data=task_data,
                 ack=partial(self.ack_msg, task.id),
             )
+
+        if not lock:
+            return await _yield_task()
+
+        async with MatrixLock(room_id=self.room_id).lock(f"{self.task_types.lock}.{task.id}"):
+            return await _yield_task()
 
     async def shutdown(self) -> None:
         """
@@ -417,18 +469,11 @@ class ReplicatedQueue(BroadcastQueue):
     def __init__(
         self,
         name: str,
+        homeserver_url: str,
+        access_token: str,
+        room_id: str,
         *args,
-        homeserver_url: str = os.environ.get("MATRIX_HOMESERVER_URL", ""),
-        access_token: str = os.environ.get("MATRIX_ACCESS_TOKEN", ""),
-        room_id: str = os.environ.get("MATRIX_ROOM_ID", ""),
         **kwargs,
     ):
-        super().__init__(
-            name,
-            *args,
-            homeserver_url=homeserver_url,
-            access_token=access_token,
-            room_id=room_id,
-            **kwargs,
-        )
+        super().__init__(name, homeserver_url, access_token, room_id, *args, **kwargs)
         self.checkpoint.type = f"{self.checkpoint.type}.{self.device_name}"
