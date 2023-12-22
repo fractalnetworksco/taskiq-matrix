@@ -367,48 +367,46 @@ class MatrixBroker(AsyncBroker):
     async def get_tasks(self) -> AsyncGenerator[List[Task], Any]:
         while True:
             tasks = {
-                self.device_queue.name: asyncio.create_task(
-                    self.device_queue.get_unacked_tasks(), name=self.device_queue.name
+                "device_queue": asyncio.create_task(
+                    self.device_queue.get_unacked_tasks(), name="device_queue"
                 ),
-                self.broadcast_queue.name: asyncio.create_task(
-                    self.broadcast_queue.get_unacked_tasks(), name=self.broadcast_queue.name
+                "broadcast_queue": asyncio.create_task(
+                    self.broadcast_queue.get_unacked_tasks(), name="broadcast_queue"
                 ),
-                self.mutex_queue.name: asyncio.create_task(
-                    self.mutex_queue.get_unacked_tasks(), name=self.mutex_queue.name
+                "mutex_queue": asyncio.create_task(
+                    self.mutex_queue.get_unacked_tasks(), name="mutex_queue"
                 ),
-                self.replication_queue.name: asyncio.create_task(
+                "replication_queue": asyncio.create_task(
                     self.replication_queue.get_unacked_tasks(exclude_self=True),
-                    name=self.replication_queue.name,
+                    name="replication_queue",
                 ),
             }
-            sync_tasks = [
-                tasks[self.device_queue.name],
-                tasks[self.broadcast_queue.name],
-                tasks[self.mutex_queue.name],
-                tasks[self.replication_queue.name],
-            ]
-
-            done, pending = await asyncio.wait(sync_tasks, return_when=asyncio.FIRST_COMPLETED)
-
             sync_task_results: List[List[Task]] = []
-            for completed_task in done:
-                try:
-                    queue, pending_tasks = completed_task.result()
-                    if pending_tasks:
-                        sync_task_results.append(pending_tasks)
-                        logger.debug(f"Got {len(pending_tasks)} tasks from {queue}")
-                except Exception as e:
-                    logger.error(f"Sync failed: {e}")
-                    raise e
-            for pending_task in pending:
-                if pending_task.done():
-                    queue, pending_tasks = pending_task.result()
-                    if pending_tasks:
-                        logger.debug(f"Got {len(pending_tasks)} tasks from {queue}")
-                        sync_task_results.append(pending_tasks)
-                else:
-                    pending_task.cancel()
-            yield list(itertools.chain.from_iterable(sync_task_results))
+
+            while tasks:
+                done, _ = await asyncio.wait(tasks.values(), return_when=asyncio.FIRST_COMPLETED)
+
+                for completed_task in done:
+                    queue_name = completed_task.get_name()
+                    try:
+                        queue, pending_tasks = completed_task.result()
+                        if pending_tasks:
+                            sync_task_results.append(pending_tasks)
+                            logger.debug(f"Got {len(pending_tasks)} tasks from {queue}")
+                    except Exception as e:
+                        logger.error(f"Sync failed: {e}")
+
+                    # Reschedule a new task for the completed queue
+                    tasks[queue_name] = asyncio.create_task(
+                        getattr(self, queue_name).get_unacked_tasks(), name=queue_name
+                    )
+
+                if sync_task_results:
+                    yield list(itertools.chain.from_iterable(sync_task_results))
+                    sync_task_results = []  # Reset for the next iteration
+
+                # Optionally, add a short delay before starting the next round
+                await asyncio.sleep(0)
 
     async def listen(self) -> AsyncGenerator[Union[AckableMessage, bytes], Any]:
         """
