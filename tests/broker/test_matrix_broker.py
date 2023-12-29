@@ -56,29 +56,68 @@ async def test_matrix_broker_with_matrix_config():
     assert hasattr(test_broker, "homeserver_url") and test_broker.homeserver_url == test_homeserver_url
     assert hasattr(test_broker, "access_token") and test_broker.access_token == test_access_token
 
-async def test_matrix_broker_init_queues_no_existing_queues():
+async def test_matrix_broker_init_queues_no_matrix_variables():
     """
-    Tests that queues are created for a broker with no existing queues.
+    Tests that an exception is raised if there are no matrix config variables
     """
 
-    # create a MatrixBroker object
     test_broker = MatrixBroker()
 
-    # verify that the broker has no queues
+    # verify that it doesn not have any matrix config attributes
+    assert not hasattr(test_broker, "room_id")
+    assert not hasattr(test_broker, "homeserver_url")
+    assert not hasattr(test_broker, "access_token")
+
+    with pytest.raises(Exception, match="Matrix config must be set with with_matrix_config."):
+        test_broker._init_queues()
+
+async def test_matrix_broker_init_queues_no_matrix_variables_side_effect():
+    """
+    Tests that an exception is raised if there are no matrix config variables
+
+    #! try to get the FIRST exception to raise using a side effect
+        #! this test is currently getting the second exception to raise
+    """
+
+    test_broker = MatrixBroker()
+
+    # verify that it doesn not have any matrix config attributes
+    assert not hasattr(test_broker, "room_id")
+    assert not hasattr(test_broker, "homeserver_url")
+    assert not hasattr(test_broker, "access_token")
+
+    with patch('taskiq_matrix.matrix_broker.all', return_value=False):
+        with pytest.raises(Exception, match="Matrix config must be set with with_matrix_config."):
+            test_broker._init_queues()
+
+async def test_matrix_broker_init_queues_no_existing_queues():
+    """
+    """
+
+    # create matrix config variables
+    test_room_id = "test room id"
+    test_homeserver_url = "test homeserver url"
+    test_access_token = "test access token"
+
+    test_broker = MatrixBroker()
+
+    # call with_matrix_config
+    test_broker.with_matrix_config(test_room_id, test_homeserver_url, test_access_token)
+
+    # verify that the broker does not have existing queues
     assert not hasattr(test_broker, "mutex_queue")
     assert not hasattr(test_broker, "device_queue")
     assert not hasattr(test_broker, "broadcast_queue")
     assert not hasattr(test_broker, "replication_queue")
 
-    # call _init_queues
+    # call _init_queues to create the broker's queues
     test_broker._init_queues()
 
-    # verify that the broker now has queues
+    # verify that queues were created for the broker
     assert hasattr(test_broker, "mutex_queue")
     assert hasattr(test_broker, "device_queue")
     assert hasattr(test_broker, "broadcast_queue")
     assert hasattr(test_broker, "replication_queue")
-
 
 async def test_matrix_broker_init_queues_existing_queues(test_matrix_broker):
     """
@@ -103,77 +142,6 @@ async def test_matrix_broker_init_queues_existing_queues(test_matrix_broker):
         # verify that the constructors weren't called
         mock_queue.assert_not_called()
 
-
-async def test_matrix_broker_init_queues_no_room_id_use_environment_variable():
-    """
-    Tests that if None is given as a room ID and the broker does not have a room ID,
-    that the matrix room id from the os.environ dictionary is used
-    """
-
-    # create a MatrixBroker object
-    test_broker = MatrixBroker()
-
-    # verify that there is no existing room id
-    assert test_broker.room_id == None
-    # save the environment variable for the room id
-    environment_room_id = os.environ["MATRIX_ROOM_ID"]
-
-    # verify that there are no existing queues in the broker
-    assert not hasattr(test_broker, "mutex_queue")
-    assert not hasattr(test_broker, "device_queue")
-    assert not hasattr(test_broker, "broadcast_queue")
-    assert not hasattr(test_broker, "replication_queue")
-
-    # call _init_queues
-    test_broker._init_queues(None)
-
-    # verify that the broker now has queues
-    assert hasattr(test_broker, "mutex_queue")
-    assert hasattr(test_broker, "device_queue")
-    assert hasattr(test_broker, "broadcast_queue")
-    assert hasattr(test_broker, "replication_queue")
-
-    # verify that the broker queues' room_id match the environment's room_id
-    assert test_broker.mutex_queue.room_id == environment_room_id
-    assert test_broker.device_queue.room_id == environment_room_id
-    assert test_broker.broadcast_queue.room_id == environment_room_id
-    assert test_broker.replication_queue.room_id == environment_room_id
-
-
-async def test_matrix_broker_init_queues_no_room_id_use_broker_id():
-    """
-    Tests that if None is given as a room ID, the broker's room id is used
-    """
-
-    # create a MatrixBroker object
-    test_broker = MatrixBroker()
-
-    # set the broker's room id to a custom id
-    broker_room_id = "test_room_id"
-    test_broker.room_id = broker_room_id
-
-    # verify that there are no existing queues in the broker
-    assert not hasattr(test_broker, "mutex_queue")
-    assert not hasattr(test_broker, "device_queue")
-    assert not hasattr(test_broker, "broadcast_queue")
-    assert not hasattr(test_broker, "replication_queue")
-
-    # call _init_queues
-    test_broker._init_queues()
-
-    # verify that the broker now has queues
-    assert hasattr(test_broker, "mutex_queue")
-    assert hasattr(test_broker, "device_queue")
-    assert hasattr(test_broker, "broadcast_queue")
-    assert hasattr(test_broker, "replication_queue")
-
-    # verify that the broker queues' room_id match the environment's room_id
-    assert test_broker.mutex_queue.room_id == broker_room_id
-    assert test_broker.device_queue.room_id == broker_room_id
-    assert test_broker.broadcast_queue.room_id == broker_room_id
-    assert test_broker.replication_queue.room_id == broker_room_id
-
-
 async def test_matrix_broker_with_result_backend_not_instance(test_matrix_broker):
     """
     Tests that an exception is raised if an object is passed to with_result_backend
@@ -191,15 +159,11 @@ async def test_matrix_broker_with_result_backend_not_instance(test_matrix_broker
     ):
         test_broker.with_result_backend(mock_backend)
 
-
+@pytest.mark.integtest
 async def test_matrix_broker_with_result_backend_is_instance(test_matrix_broker):
     """
     Tests that if a MatrixResultBackend object is passed to with_result_backend, the
     superclass' with_result_backend is called with the same object
-
-    FIXME: Instead of mocking with_result_backend like that, just call 
-    test_broker.with_result_backend(mock_backend) and assert that it returns a broker 
-    instance with the result_backend set to the passed instance.
     """
 
     # create a MatrixBroker object from a fixture
@@ -208,12 +172,10 @@ async def test_matrix_broker_with_result_backend_is_instance(test_matrix_broker)
     # mock a MatrixResultBackend object
     mock_backend = MagicMock(spec=MatrixResultBackend)
 
-    # mock the super class' with_result_backend function
-    with patch.object(AsyncBroker, "with_result_backend") as mock_super:
-        # call with_result_backend and verify that the super class called it as well
-        test_broker.with_result_backend(mock_backend)
-        mock_super.assert_called_once_with(mock_backend)
-
+    # call with_result_backend and verify that the object returned has a 
+    # result_backend attribute matching the mocked MatrixResultBackend object
+    result = test_broker.with_result_backend(mock_backend)
+    assert result.result_backend == mock_backend
 
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_unknown_error(test_matrix_broker):
@@ -239,7 +201,6 @@ async def test_matrix_broker_add_mutex_checkpoint_task_unknown_error(test_matrix
     with pytest.raises(Exception):
         await broker.add_mutex_checkpoint_task()
 
-
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_known_error(test_matrix_broker):
     """
@@ -263,7 +224,6 @@ async def test_matrix_broker_add_mutex_checkpoint_task_known_error(test_matrix_b
     with patch("taskiq_matrix.matrix_broker.logger", new=MagicMock()) as mock_logger:
         await broker.add_mutex_checkpoint_task()
         mock_logger.info.assert_called_once()
-
 
 @pytest.mark.integtest
 async def test_matrix_broker_integration_test(test_matrix_broker):
@@ -294,7 +254,6 @@ async def test_matrix_broker_integration_test(test_matrix_broker):
     assert schedules.content["tasks"][0]["args"] == ["mutex"]
     assert schedules.content["tasks"][0]["kwargs"] == {}
 
-
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_content_errcode(test_matrix_broker):
     """
@@ -321,7 +280,6 @@ async def test_matrix_broker_add_mutex_checkpoint_task_content_errcode(test_matr
     # call add_mutex_checkpoint_task to raise an exception caused by the "errcode" key
     with pytest.raises(Exception):
         await broker.add_mutex_checkpoint_task()
-
 
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_checkpoint_exists(test_matrix_broker):
@@ -363,7 +321,6 @@ async def test_matrix_broker_add_mutex_checkpoint_task_checkpoint_exists(test_ma
 
         mock_room_put_state.assert_not_called()
 
-
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_update_schedule(test_matrix_broker):
     """
@@ -386,7 +343,6 @@ async def test_matrix_broker_add_mutex_checkpoint_task_update_schedule(test_matr
     result = await broker.add_mutex_checkpoint_task()
 
     assert result
-
 
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_put_state_error(test_matrix_broker):
@@ -415,7 +371,6 @@ async def test_matrix_broker_add_mutex_checkpoint_task_put_state_error(test_matr
 
         assert not result
         mock_room_put_state.assert_called_once()
-
 
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_lock_fail(test_matrix_broker):
@@ -872,4 +827,10 @@ async def test_matrix_broker_kick_device_queue_valid_device_label(
         task_id=test_broker_message.task_id,
         queue='device'
     )
+
+@pytest.mark.skip(reason="called by the worker, not currently testable")
+async def test_matrix_broker_listen():
+    """
+    NOTE listen is not currently testable
+    """
 

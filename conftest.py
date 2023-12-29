@@ -8,7 +8,6 @@ from uuid import uuid4
 import pytest
 from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
-
 from taskiq_matrix.matrix_broker import (
     BroadcastQueue,
     MatrixBroker,
@@ -65,6 +64,9 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
 
         # set the broker's room id
         broker.room_id = room_id
+        broker.with_matrix_config(
+            room_id, os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
+        )
 
         # use room_id for the queues
         broker._init_queues()
