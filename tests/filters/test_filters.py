@@ -245,7 +245,6 @@ async def test_filters_run_sync_filter_with_kwargs():
     assert result == expected_result
 
 
-@pytest.mark.integtest  # ? "not" and "append" appear to be external functions
 async def test_filters_get_first_unacked_task_mixed_tasks():
     """
     Tests that the first unacked task in a list is returned. Duplicate tasks are
@@ -278,7 +277,6 @@ async def test_filters_get_first_unacked_task_mixed_tasks():
     )
 
 
-@pytest.mark.integtest  # depends on "append" and "not"
 async def test_filters_get_first_unacked_task_only_acked_tasks():
     """
     Tests that no tasks are returned if no unacked tasks are passed to it
@@ -299,7 +297,6 @@ async def test_filters_get_first_unacked_task_only_acked_tasks():
     assert result == {}
 
 
-@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_with_limit():
     """
     Tests that create_filter returns a dictionary with the same room_id and limit that
@@ -317,8 +314,6 @@ async def test_filters_create_filter_with_limit():
     assert filter["room"]["rooms"][0] == test_room_id
     assert filter["room"]["timeline"]["limit"] == test_limit
 
-
-@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_no_limit():
     """
     Tests that a dictionary with the correct room_id and missing the limit key is
