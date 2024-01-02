@@ -1,10 +1,9 @@
 import json
 from base64 import b64encode
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
-from fractal.matrix.async_client import FractalAsyncClient
-
 
 import pytest
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import MatrixRoom, RoomMessagesResponse, SyncResponse
 from taskiq_matrix.lock import (
     LockAcquireError,
@@ -92,7 +91,7 @@ async def test_matrix_lock_constructor_existing_next_batch():
     given the existing next_batch
     """
 
-    # make a test next_batch 
+    # make a test next_batch
     test_next_batch = "test_next_batch"
 
     # patch the MatrixLock class' next_batch to be the created nest_batch
@@ -103,7 +102,7 @@ async def test_matrix_lock_constructor_existing_next_batch():
         ) as mock_console_log:
             lock = MatrixLock()
 
-            # verify that the mocked function was called and that the lock object's 
+            # verify that the mocked function was called and that the lock object's
             # next_batch reflects what was created locally
             mock_console_log.assert_called_once()
             assert lock.next_batch == test_next_batch
@@ -142,7 +141,7 @@ async def test_matrix_lock_create_filter_given_room_id():
         # call create_filter and pass a room id
         lock.create_filter(room_id="test room id")
 
-        # verify that the function was called using the given room id instead of 
+        # verify that the function was called using the given room id instead of
         # the lock object's room id
         mock_create_filter.assert_called_once_with("test room id", types=[], limit=None)
 
@@ -160,7 +159,7 @@ async def test_matrix_lock_send_message_is_bytes():
     test_message = b"test byte message"
     encoded_test_message = b64encode(test_message).decode("utf-8")
 
-    # mock the room_send function 
+    # mock the room_send function
     mock_room_send = AsyncMock()
     mock_room_send.return_value = RoomSendResponse(event_id="abc", room_id=lock.room_id)
     lock.client.room_send = mock_room_send
@@ -188,7 +187,7 @@ async def test_matrix_lock_send_message_is_dictionary():
     test_message = {"test": "test message"}
     expected_message = json.dumps(test_message)
 
-    # mock the room_send function 
+    # mock the room_send function
     mock_room_send = AsyncMock()
     mock_room_send.return_value = RoomSendResponse(event_id="abc", room_id=lock.room_id)
     lock.client.room_send = mock_room_send
@@ -217,7 +216,7 @@ async def test_matrix_lock_send_message_is_string():
     # create a message string
     test_message = "test message"
 
-    # mock the room_send function 
+    # mock the room_send function
     mock_room_send = AsyncMock()
     mock_room_send.return_value = RoomSendResponse(event_id="abc", room_id=lock.room_id)
     lock.client.room_send = mock_room_send
@@ -250,7 +249,7 @@ async def test_matrix_lock_send_message_MatrixRoom_is_passed():
     # create a MatrixRoom object
     test_room = MatrixRoom(room_id="test room id", own_user_id="test user")
 
-    # mock the room_send function 
+    # mock the room_send function
     mock_room_send = AsyncMock()
     mock_room_send.return_value = RoomSendResponse(event_id="abc", room_id=lock.room_id)
     lock.client.room_send = mock_room_send
@@ -296,7 +295,7 @@ async def test_matrix_lock_send_message_error_response():
     """
     Tests that an exception is raised when there is an error sending a message
     """
-    
+
     # create a MatrixLock object
     lock = MatrixLock()
 
@@ -342,30 +341,21 @@ async def test_matrix_lock_lock_LockAcquireError(new_matrix_room):
     assert "Could not acquire lock" in str(e.value)
 
 
-async def test_matrix_lock_lock_functional_test(new_matrix_room):
+async def test_matrix_lock_lock_functional_test():
     """
-    ? how do i check the yield
+    Tests that the lock's lock_id is yielded when successfully locking a room state
     """
 
-    # load in a room_id fixture
-    room_id = await new_matrix_room()
+    # create a MatrixLock object
+    test_lock = MatrixLock()
 
-    # create a MatrixLock object and mock the _acquire_lock function
-    lock = MatrixLock()
-    mock_acquire_lock = AsyncMock()
-    # set _acquire_lock to return True
-    mock_acquire_lock.return_value = True
-    lock._acquire_lock = mock_acquire_lock
+    # set the lock id
+    test_lock.lock_id = "test_lock_id"
 
-    # patch the send_message function to verify it was called
-    with patch(
-        "taskiq_matrix.lock.MatrixLock.send_message", new_awaitable=AsyncMock
-    ) as mock_send_message:
-        async with lock.lock(room_id):
-            print("locking")
-
-        # verify that send_message was called
-        mock_send_message.assert_awaited_once()
+    # call lock()
+    async with test_lock.lock("hello") as lock_id:
+        # verify that the lock id yielded by lock() matches the lock_id
+        assert lock_id == "test_lock_id"
 
 
 async def test_matrix_lock_acquire_lock_existing_next_batch():
@@ -441,8 +431,15 @@ async def test_matrix_lock_acquire_lock_room_id_in_res():
 
 
 async def test_matrix_lock_acquire_lock_not_acquired():
-    """ """
+    """
+    Tests that a lock is not acquired if a filter is returned with a different room_id
+    than what is in the lock
+    """
+
+    # create a lock object
     lock = MatrixLock()
+
+    # mock the lock's filter function and set its return values
     mock_filter = AsyncMock()
     second_call = {
         lock.room_id: [
@@ -455,67 +452,107 @@ async def test_matrix_lock_acquire_lock_not_acquired():
     mock_filter.side_effect = [{}, second_call]
     lock.filter = mock_filter
 
+    # patch the logger to verify function calls
     with patch("taskiq_matrix.lock.logger", new=MagicMock) as mock_logger:
         mock_logger.debug = MagicMock()
         mock_logger.info = MagicMock()
+
+        # call _acquire_lock()
         result = await lock._acquire_lock()
+
+        # verify that it returned false
         assert not result
+
+        # verify the logger.info function call, signifying that the function returned
+        # False from the else block
         mock_logger.info.assert_called_once()
 
+
 async def test_matrix_lock_filter_works(new_matrix_room):
-    """ """
+    """ 
+    Tests that the filter function returns a dictionary containing the message sent 
+    to the room.
+    """
+
+    # create a room id from fixture
     room_id = await new_matrix_room()
 
+    # create a lock object using the room id created
     lock = MatrixLock(room_id=room_id)
     lock_types = [f"fn.lock.acquire.test", f"fn.lock.release.test"]
 
+    # update the sync token
     next = await lock.get_latest_sync_token()
-
     lock.next_batch = next
+
+    # send message to room
     await lock.send_message(
         {"test": "chicken"},
         msgtype=lock_types[0],
     )
 
-    res = await lock.filter(
-        lock.create_filter(types=lock_types), timeout=0
-    )
+    # call filter and verify that a dictionary is returned containing the message that was 
+    # sent to the room
+    res = await lock.filter(lock.create_filter(types=lock_types), timeout=0)
     assert lock.room_id in res
 
+
 async def test_matrix_lock_filter_syncerror():
-    """ """
+    """ 
+    Tests that an exception is raised if sync returns a SyncError
+    """
+
+    # create a lock object
     lock = MatrixLock()
+
+    # mock the lock's client's sync function and have it return a SyncError
     mock_sync = AsyncMock()
     mock_sync.return_value = SyncError(message="test error message")
     lock.client.sync = mock_sync
 
+    # call filter to raise an exception
     with pytest.raises(Exception) as e:
         await lock.filter(filter={}, timeout=0)
 
+    # verify that the error message matches what was raised
     assert "test error message" == str(e.value)
 
 
 async def test_matrix_lock_get_latest_sync_token_error():
-    """ """
+    """ 
+    Tests that an exception is raised if room_messages returns a RoomMessagesError
+    """
+
+    # create a lock object
     lock = MatrixLock()
 
+    # mock the _room messages function to return a RoomMessagesError
     lock.client.room_messages = AsyncMock()
     lock.client.room_messages.return_value = RoomMessagesError(message="test_message")
 
+    # call get_latest_sync_token to raise an exception
     with pytest.raises(Exception) as e:
         await lock.get_latest_sync_token()
+    # verify that the exception error raised matches what was expected
     assert lock.room_id in str(e.value)
 
 
 async def test_matrix_lock_get_latest_sync_token_good_response():
-    """ """
+    """ 
+    Tests that the start token is returned when room_messages returns a RoomMessagesResponse
+    """
 
+    # create a lock object
     lock = MatrixLock()
 
+    # mock the room_messages function and have it return a RoommessageResponse
     lock.client.room_messages = AsyncMock()
     mock_response = AsyncMock(spec=RoomMessagesResponse)
+
+    # create a start token
     mock_response.start = "test token"
     lock.client.room_messages.return_value = mock_response
 
+    # call get_latest_sync_token
     result = await lock.get_latest_sync_token()
     assert result == "test token"
