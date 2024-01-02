@@ -25,3 +25,4 @@ broker = (
 )
 
 scheduler = TaskiqScheduler(broker=broker, sources=[MatrixRoomScheduleSource(broker)])
+
