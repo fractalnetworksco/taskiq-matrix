@@ -19,6 +19,7 @@ COPY tests /code/tests
 COPY .coveragerc conftest.py pytest.ini /code/
 
 # install package
+RUN pip3 install git+https://github.com/fractalnetworksco/fractal-matrix-client.git@main
 RUN pip3 install -e /code[dev]
 
 COPY test-config /test-config

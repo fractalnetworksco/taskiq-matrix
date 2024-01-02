@@ -112,8 +112,8 @@ class MatrixBroker(AsyncBroker):
                 raise Exception(schedules.message)
 
             logger.info(
-                f"No schedules found for room {self.mutex_queue.room_id}, will attempt to add checkpoint task",
-                "info",
+                "No schedules found for room %s, will attempt to add checkpoint task",
+                self.mutex_queue.room_id,
             )
             content = {"tasks": [task]}
 
