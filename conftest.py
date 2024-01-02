@@ -65,9 +65,13 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
 
         # set the broker's room id
         broker.room_id = room_id
+        url = os.environ["MATRIX_HOMESERVER_URL"]
+        access_token = os.environ["MATRIX_ACCESS_TOKEN"]
+
+        broker.with_matrix_config(room_id, url, access_token)
 
         # use room_id for the queues
-        broker._init_queues(room_id=room_id)
+        broker._init_queues()
 
         return broker
 
