@@ -4,9 +4,10 @@ import os
 from typing import Any, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
+from fractal.matrix import FractalAsyncClient
 
 import pytest
-from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse, UnknownEvent
+from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
 from taskiq_matrix.matrix_broker import (
     BroadcastQueue,
@@ -14,6 +15,7 @@ from taskiq_matrix.matrix_broker import (
     MatrixQueue,
     ReplicatedQueue,
 )
+from taskiq_matrix.matrix_result_backend import MatrixResultBackend
 from taskiq_matrix.matrix_queue import Checkpoint
 
 try:
@@ -27,15 +29,14 @@ except KeyError:
 
 
 @pytest.fixture(scope="function")
-def matrix_client() -> Generator[AsyncClient, None, None]:
-    client = AsyncClient(homeserver=TEST_HOMESERVER_URL)
-    client.access_token = TEST_USER_ACCESS_TOKEN
+def matrix_client() -> Generator[FractalAsyncClient, None, None]:
+    client = FractalAsyncClient(access_token=TEST_USER_ACCESS_TOKEN)
     yield client
     asyncio.run(client.close())
 
 
 @pytest.fixture(scope="function")
-def new_matrix_room(matrix_client: AsyncClient):
+def new_matrix_room(matrix_client: FractalAsyncClient):
     """
     Creates a new room and returns its room id.
     """
@@ -50,6 +51,17 @@ def new_matrix_room(matrix_client: AsyncClient):
 
     return create
 
+
+@pytest.fixture(scope="function")
+def test_matrix_result_backend(new_matrix_room):
+    """
+    Creates a MatrixResultBackend object
+    """
+    async def create():
+        room_id = await new_matrix_room()
+        return MatrixResultBackend(homeserver_url=os.environ["MATRIX_HOMESERVER_URL"], access_token=os.environ["MATRIX_ACCESS_TOKEN"], room_id=room_id)
+
+    return create
 
 @pytest.fixture(scope="function")
 def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
@@ -98,19 +110,12 @@ def test_broker_message():
 
 
 @pytest.fixture(scope="function")
-def test_checkpoint(test_room_id) -> Checkpoint:
-    mock_client_parameter = MagicMock(spec=AsyncClient)
+def test_checkpoint(test_room_id):
+    mock_client_parameter = MagicMock(spec=FractalAsyncClient)
     mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
         content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
     )
     return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
-
-
-# FIXME: Add a Matrix result backend fixture. The fixture should look very similar
-#        to the matrix_client fixture above. The only difference is that the
-#        result backend fixture should return a MatrixResultBackend instance.
-#        Make sure to call the shutdown method on the result backend after yielding!
-
 
 @pytest.fixture
 def test_room_id() -> str:
