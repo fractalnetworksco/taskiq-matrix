@@ -117,7 +117,7 @@ class MatrixResultBackend(AsyncResultBackend):
         """
         if not self.next_batch:
             res = await self.matrix_client.room_messages(
-                self.room, start="", limit=1, direction=MessageDirection.back
+                self.room, start="", limit=1, direction=MessageDirection.front
             )
             if not isinstance(res, RoomMessagesError):
                 self.next_batch = res.start

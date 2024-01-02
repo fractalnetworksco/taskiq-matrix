@@ -75,7 +75,10 @@ class MatrixBroker(AsyncBroker):
         return self
 
     def _init_queues(self):
-        if not all([self.room_id, self.homeserver_url, self.access_token]):
+        try:
+            if not all([self.room_id, self.homeserver_url, self.access_token]):
+                raise Exception("Matrix config must be set with with_matrix_config.")
+        except:
             raise Exception("Matrix config must be set with with_matrix_config.")
 
         if not hasattr(self, "mutex_queue"):
@@ -135,7 +138,7 @@ class MatrixBroker(AsyncBroker):
                 raise Exception(schedules.message)
 
             logger.info(
-                f"No schedules found for room %s, will attempt to add checkpoint task",
+                "No schedules found for room %s, will attempt to add checkpoint task",
                 self.mutex_queue.room_id,
             )
             content = {"tasks": [task]}
