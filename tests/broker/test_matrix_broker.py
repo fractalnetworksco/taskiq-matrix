@@ -74,21 +74,16 @@ async def test_matrix_broker_init_queues_no_matrix_variables():
 async def test_matrix_broker_init_queues_no_matrix_variables_side_effect():
     """
     Tests that an exception is raised if there are no matrix config variables
-
-    #! try to get the FIRST exception to raise using a side effect
-        #! this test is currently getting the second exception to raise
     """
 
     test_broker = MatrixBroker()
 
-    # verify that it doesn not have any matrix config attributes
-    assert not hasattr(test_broker, "room_id")
-    assert not hasattr(test_broker, "homeserver_url")
-    assert not hasattr(test_broker, "access_token")
+    test_broker.room_id = ""
+    test_broker.homeserver_url = ""
+    test_broker.access_token = ""
 
-    with patch('taskiq_matrix.matrix_broker.all', return_value=False):
-        with pytest.raises(Exception, match="Matrix config must be set with with_matrix_config."):
-            test_broker._init_queues()
+    with pytest.raises(Exception, match="Matrix config must be set with with_matrix_config."):
+        test_broker._init_queues()
 
 async def test_matrix_broker_init_queues_no_existing_queues():
     """
