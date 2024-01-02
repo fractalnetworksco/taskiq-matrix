@@ -29,8 +29,7 @@ except KeyError:
 
 @pytest.fixture(scope="function")
 def matrix_client() -> Generator[FractalAsyncClient, None, None]:
-    client = FractalAsyncClient()
-    client.access_token = TEST_USER_ACCESS_TOKEN
+    client = FractalAsyncClient(access_token=TEST_USER_ACCESS_TOKEN)
     yield client
     asyncio.run(client.close())
 
