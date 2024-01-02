@@ -3,6 +3,7 @@ from base64 import b64encode
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 from fractal.matrix.async_client import FractalAsyncClient
 
+
 import pytest
 from nio import MatrixRoom, RoomMessagesResponse, SyncResponse
 from taskiq_matrix.lock import (
@@ -461,60 +462,25 @@ async def test_matrix_lock_acquire_lock_not_acquired():
         assert not result
         mock_logger.info.assert_called_once()
 
-
-async def test_matrix_lock_filter_no_kwargs(new_matrix_room):
+async def test_matrix_lock_filter_works(new_matrix_room):
     """ """
     room_id = await new_matrix_room()
 
     lock = MatrixLock(room_id=room_id)
-    lock_types = [f"fn.lock.acquire.None", f"fn.lock.release.None"]
-    # ? might need to put checkpoint state
+    lock_types = [f"fn.lock.acquire.test", f"fn.lock.release.test"]
 
-    mock_client = MagicMock(spec=FractalAsyncClient)
-    mock_sync = AsyncMock()
-    mock_client.sync = mock_sync
+    next = await lock.get_latest_sync_token()
 
-    # ! look at test_filters and do something similar
-
-    # next = await lock.get_latest_sync_token()
-    # print('next=====', next)
-    # lock.client.next_batch = next
+    lock.next_batch = next
+    await lock.send_message(
+        {"test": "chicken"},
+        msgtype=lock_types[0],
+    )
 
     res = await lock.filter(
         lock.create_filter(types=lock_types), timeout=0
     )
-    print('no kwargs res=========', res)
-
     assert lock.room_id in res
-
-async def test_matrix_lock_new_test_delete_this(new_matrix_room):
-    """
-    """
-    room_id = await new_matrix_room()
-    lock = MatrixLock(room_id=room_id)
-    print('room id=====', lock.room_id)
-    print('lock id=======', lock.lock_id)
-
-async def test_matrix_lock_filter_with_kwargs_non_meaningful(new_matrix_room):
-    """ """
-    room_id = await new_matrix_room()
-
-    lock = MatrixLock(room_id=room_id)
-    lock_types = [f"fn.lock.acquire.None", f"fn.lock.release.None"]
-    next = await lock.get_latest_sync_token()
-    print('next=====', next)
-    lock.client.next_batch = next
-    additional_kwargs = {"test": "should return empty list"}
-
-    res = await lock.filter(
-        lock.create_filter(types=lock_types),
-        timeout=0,
-        **additional_kwargs,
-    )
-    print('kwargs res=========', res)
-    assert res[lock.room_id] == []
-
-# ! add a test that uses meaningful kwargs
 
 async def test_matrix_lock_filter_syncerror():
     """ """
