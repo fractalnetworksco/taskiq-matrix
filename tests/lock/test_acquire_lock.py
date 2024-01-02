@@ -1,18 +1,20 @@
 import asyncio
+from typing import Awaitable, Callable
 from uuid import uuid4
 
 from taskiq_matrix.exceptions import LockAcquireError
 from taskiq_matrix.lock import MatrixLock
 
 
-async def test_acquire_lock_success():
+async def test_acquire_lock_success(new_matrix_room: Callable[[], Awaitable[str]]):
     """
     Ensure that only one instance of a lock can be acquired for a certain key.
     """
+    room_id = await new_matrix_room()
     key = str(uuid4())
 
     async def get_lock(key: str) -> bool:
-        async with MatrixLock().lock(key) as lock_id:
+        async with MatrixLock(room_id=room_id).lock(key) as lock_id:
             assert lock_id is not None
         return True
 
