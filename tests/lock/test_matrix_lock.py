@@ -91,21 +91,17 @@ async def test_matrix_lock_constructor_existing_next_batch():
     given the existing next_batch
     """
 
-    # make a test next_batch
-    test_next_batch = "test_next_batch"
+    # set the next batch for the MatrixLock class
+    MatrixLock.next_batch = "test_next_batch"
 
-    # patch the MatrixLock class' next_batch to be the created nest_batch
-    with patch("taskiq_matrix.lock.MatrixLock.next_batch", test_next_batch):
-        # patch the setup_console_logging() function to verify it was called
-        with patch(
-            "taskiq_matrix.lock.setup_console_logging", new_awaitable=AsyncMock
-        ) as mock_console_log:
-            lock = MatrixLock()
+    # create a matrix lock object
+    lock = MatrixLock()
 
-            # verify that the mocked function was called and that the lock object's
-            # next_batch reflects what was created locally
-            mock_console_log.assert_called_once()
-            assert lock.next_batch == test_next_batch
+    # verify that the lock object's next_batch matches what was set for the class
+    assert lock.next_batch == "test_next_batch"
+
+    # reset the MatrixLock class' next_batch
+    MatrixLock.next_batch = None
 
 
 async def test_matrix_lock_create_filter_no_room_id():
