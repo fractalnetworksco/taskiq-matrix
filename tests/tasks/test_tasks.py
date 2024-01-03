@@ -3,12 +3,13 @@ import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from taskiq_matrix.matrix_broker import MatrixBroker
 from nio import MessageDirection, RoomMessagesResponse
+from taskiq_matrix.matrix_broker import MatrixBroker
 from taskiq_matrix.tasks import (
     QueueDoesNotExist,
+    RoomContextError,
     get_first_unacked_task,
-    update_checkpoint
+    update_checkpoint,
 )
 from taskiq_matrix.utils import send_message
 
@@ -42,14 +43,15 @@ async def test_tasks_update_checkpoint_is_replicated_queue(test_matrix_broker):
 
     # patch the task.py broker with the broker fixture
     with patch("taskiq_matrix.tasks.broker", test_broker):
-        # NOTE an exception is raised in run_sync_filter but is not relavent to 
-            # this test
+        # NOTE an exception is raised in run_sync_filter but is not relavent to
+        # this test
         with pytest.raises(Exception):
             # call update_checkpoint passing "replication" as the queue name
             result = await update_checkpoint("replication")
-    
-    # verify that get_or_init_checkpoint was called 
+
+    # verify that get_or_init_checkpoint was called
     mock_get_or_init.assert_called_with(full_sync=True)
+
 
 async def test_tasks_update_checkpoint_no_tasks(test_matrix_broker):
     """
@@ -77,9 +79,10 @@ async def test_tasks_update_checkpoint_no_tasks(test_matrix_broker):
 
     assert result
 
+
 @pytest.mark.skip(reason="not returning acks, might be related to the synapse issue")
 async def test_tasks_update_checkpoint_mixed_tasks(test_matrix_broker):
-    """ 
+    """
     #? This might be an issue with the same Synapse-glob issue not returning acks
     """
 
@@ -130,15 +133,16 @@ async def test_tasks_update_checkpoint_mixed_tasks(test_matrix_broker):
         task_id=event3["task_id"],
     )
 
-    print('test tasks==========', await matrix_queue.get_tasks())
-    print('test queue type', matrix_queue)
+    print("test tasks==========", await matrix_queue.get_tasks())
+    print("test queue type", matrix_queue)
 
     with patch("taskiq_matrix.tasks.broker", broker):
         result = await update_checkpoint("mutex")
-    
+
+
 async def test_tasks_update_checkpoint_unable_to_update(test_matrix_broker):
     """
-    Tests that an exception is raised if the 
+    Tests that an exception is raised if the
     """
 
     # create a broker fixture
@@ -154,6 +158,126 @@ async def test_tasks_update_checkpoint_unable_to_update(test_matrix_broker):
         # call update_checkpoint to raise an exception
         with pytest.raises(Exception) as e:
             await update_checkpoint("mutex")
-        
+
         # verify that the exception that was raised matches what was expected
-        assert str(e.value) == 'Failed to update checkpoint mutex.'
+        assert str(e.value) == "Failed to update checkpoint mutex."
+
+
+async def test_tasks_update_checkpoint_unacked_tasks_only(test_matrix_broker):
+    """
+    ? not recognizing unacked tasks
+    """
+
+    test_broker = await test_matrix_broker()
+
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
+
+    # create unacked task events
+    event2 = {
+        "task_id": "josdfj09b48907w3",
+        "queue": "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}",
+    }
+
+    event3 = {
+        "task_id": "josdfj09b48907w4",
+        "queue": "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}",
+    }
+
+    assert not await matrix_queue.task_is_acked(event2["task_id"])
+    assert not await matrix_queue.task_is_acked(event3["task_id"])
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event2),
+        queue="mutex",
+        msgtype=event2["msgtype"],
+        task_id=event2["task_id"],
+    )
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event3),
+        queue="mutex",
+        msgtype=event3["msgtype"],
+        task_id=event3["task_id"],
+    )
+
+    with patch("taskiq_matrix.tasks.broker", test_broker):
+        await update_checkpoint("mutex")
+
+
+async def test_tasks_update_checkpoint_unacked_tasks_room_context_error(test_matrix_broker):
+    """ """
+    test_broker = await test_matrix_broker()
+
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
+
+    #!============
+    #? Get the above test to
+    #? work and paste here
+    #!============
+    matrix_queue.client.room_context = AsyncMock(return_value=MagicMock(spec=RoomContextError))
+
+    with patch("taskiq_matrix.tasks.broker", test_broker):
+        with pytest.raises(Exception):
+            await update_checkpoint("mutex")
+
+
+async def test_tasks_update_checkpoint_acked_tasks_only(test_matrix_broker):
+    """
+    ? not recognizing the tasks, instead skipping the "no tasks found" logger
+    ? debug function call
+
+    ! kick a task to the broker and see if that works
+    """
+
+    test_broker = await test_matrix_broker()
+
+    await test_broker.startup()
+
+    matrix_queue = test_broker.mutex_queue
+
+    # create unacked task events
+    event2 = {
+        "task_id": "josdfj09b48907w3",
+        "queue": "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3",
+    }
+
+    event3 = {
+        "task_id": "josdfj09b48907w4",
+        "queue": "mutex_queue",
+        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w4",
+    }
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event2),
+        queue="mutex",
+        msgtype=event2["msgtype"],
+        task_id=event2["task_id"],
+    )
+
+    await send_message(
+        matrix_queue.client,
+        matrix_queue.room_id,
+        message=json.dumps(event3),
+        queue="mutex",
+        msgtype=event3["msgtype"],
+        task_id=event3["task_id"],
+    )
+
+    assert await matrix_queue.task_is_acked(event2["task_id"])
+    assert await matrix_queue.task_is_acked(event3["task_id"])
+
+    with patch("taskiq_matrix.tasks.broker", test_broker):
+        await update_checkpoint("mutex")
