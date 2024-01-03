@@ -42,7 +42,7 @@ async def test_filters_run_sync_filter_false_content_only():
     with a list of events
     """
 
-    # create a mock AsyncClient object and mock its sync function
+    # create a mock FractalAsyncClient object and mock its sync function
     mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
@@ -85,10 +85,10 @@ async def test_filters_run_sync_filter_true_content_only(unknown_event_factory):
     """
     Test that setting content_only to True returns a dictionary of rooms
     with a list of what was the value associated with the 'content' key of the
-    events
+    events and the sender of the event
     """
 
-    # create a mock AsyncClient object and mock its sync function
+    # create a mock FractalAsyncClient object and mock its sync function
     mock_client = MagicMock(spec=FractalAsyncClient)
     mock_sync = AsyncMock()
     mock_client.sync = mock_sync
@@ -102,13 +102,17 @@ async def test_filters_run_sync_filter_true_content_only(unknown_event_factory):
         "room2": MagicMock(),
     }
 
-    # create a dictionary of mock event objects and assign them a room
+    event1 = unknown_event_factory("event1", "sender1")
+    event2 = unknown_event_factory("event2", "sender2")
+    event3 = unknown_event_factory("event3", "sender3")
+
+    # create a dictionary of event objects and assign them a room
     mock_client.sync.return_value.rooms.join["room1"].timeline.events = [
-        unknown_event_factory("event1", "sender1"),
-        unknown_event_factory("event2", "sender2"),
+        event1,
+        event2
     ]
     mock_client.sync.return_value.rooms.join["room2"].timeline.events = [
-        unknown_event_factory("event3", "sender3"),
+        event3
     ]
 
     # Call the run_sync_filter function
@@ -121,16 +125,16 @@ async def test_filters_run_sync_filter_true_content_only(unknown_event_factory):
     )
 
     # assert the structure of the result
-    assert result == {
-        "room1": [
-            {"body": "event1", "sender": "sender1", "type": "test.event"},
-            {"body": "event2", "sender": "sender2", "type": "test.event"},
-        ],
-        "room2": [{"body": "event3", "sender": "sender3", "type": "test.event"}],
-    }
+    assert result["room1"][0] == event1.source["content"]
+    assert "origin_server_ts" not in result["room1"][0]
+
+    assert result["room1"][1] == event2.source["content"]
+    assert "origin_server_ts" not in result["room1"][1]
+
+    assert result["room2"][0] == event3.source["content"]
+    assert "origin_server_ts" not in result["room2"][0]
 
 
-@pytest.mark.integtest  # ? "not" and "append" appear to be external functions
 async def test_filters_get_first_unacked_task_mixed_tasks():
     """
     Tests that the first unacked task in a list is returned. Duplicate tasks are
@@ -163,7 +167,6 @@ async def test_filters_get_first_unacked_task_mixed_tasks():
     )
 
 
-@pytest.mark.integtest  # depends on "append" and "not"
 async def test_filters_get_first_unacked_task_only_acked_tasks():
     """
     Tests that no tasks are returned if no unacked tasks are passed to it
@@ -184,7 +187,6 @@ async def test_filters_get_first_unacked_task_only_acked_tasks():
     assert result == {}
 
 
-@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_with_limit():
     """
     Tests that create_filter returns a dictionary with the same room_id and limit that
@@ -202,8 +204,6 @@ async def test_filters_create_filter_with_limit():
     assert filter["room"]["rooms"][0] == test_room_id
     assert filter["room"]["timeline"]["limit"] == test_limit
 
-
-@pytest.mark.integtest  # depends on uuid
 async def test_filters_create_filter_no_limit():
     """
     Tests that a dictionary with the correct room_id and missing the limit key is
