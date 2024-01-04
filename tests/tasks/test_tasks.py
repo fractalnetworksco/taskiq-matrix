@@ -221,8 +221,8 @@ async def test_tasks_update_checkpoint_unacked_tasks_room_context_error(test_mat
     matrix_queue = test_broker.mutex_queue
 
     #!============
-    #? Get the above test to
-    #? work and paste here
+    # ? Get the above test to
+    # ? work and paste here
     #!============
     matrix_queue.client.room_context = AsyncMock(return_value=MagicMock(spec=RoomContextError))
 
@@ -231,11 +231,11 @@ async def test_tasks_update_checkpoint_unacked_tasks_room_context_error(test_mat
             await update_checkpoint("mutex")
 
 
-async def test_tasks_update_checkpoint_acked_tasks_only(test_matrix_broker):
+async def test_tasks_update_checkpoint_acked_tasks_only(test_matrix_broker, test_broker_message):
     """
     ? not recognizing the tasks, instead skipping the "no tasks found" logger
     ? debug function call
-
+    
     ! kick a task to the broker and see if that works
     """
 
@@ -244,6 +244,8 @@ async def test_tasks_update_checkpoint_acked_tasks_only(test_matrix_broker):
     await test_broker.startup()
 
     matrix_queue = test_broker.mutex_queue
+    test_broker_message.labels = {"test": "labels"}
+    await test_broker.kick(test_broker_message)
 
     # create unacked task events
     event2 = {
