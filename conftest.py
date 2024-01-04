@@ -11,10 +11,7 @@ from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
 
 from taskiq_matrix.matrix_broker import (
-    BroadcastQueue,
-    MatrixBroker,
-    MatrixQueue,
-    ReplicatedQueue,
+        BroadcastQueue,MatrixBroker,
 )
 from taskiq_matrix.matrix_result_backend import MatrixResultBackend
 from taskiq_matrix.matrix_queue import Checkpoint

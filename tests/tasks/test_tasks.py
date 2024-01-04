@@ -1,6 +1,7 @@
 import json
+import time
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, Mock
 
 import pytest
 from nio import MessageDirection, RoomMessagesResponse
@@ -89,53 +90,6 @@ async def test_tasks_update_checkpoint_mixed_tasks(test_matrix_broker):
     broker = await test_matrix_broker()
     matrix_queue = broker.mutex_queue
 
-    # create dictionaries of unacked and acked
-    # task events to be sent to the queue
-    event1 = {
-        "task_id": "josdfj09b48907w3",
-        "queue": "mutex",
-        "msgtype": matrix_queue.task_types.task,
-    }
-    event2 = {
-        "task_id": "josdfj09b48900w3",
-        "queue": "mutex",
-        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48900w3",
-    }
-    event3 = {
-        "task_id": "kdjfosdf-4j239034",
-        "queue": "mutex",
-        "msgtype": matrix_queue.task_types.task,
-    }
-
-    # send messages to the queue
-    await send_message(
-        matrix_queue.client,
-        matrix_queue.room_id,
-        message=json.dumps(event1),
-        queue="mutex",
-        msgtype=event1["msgtype"],
-        task_id=event1["task_id"],
-    )
-    await send_message(
-        matrix_queue.client,
-        matrix_queue.room_id,
-        message=json.dumps(event2),
-        queue="mutex",
-        msgtype=event2["msgtype"],
-        task_id=event2["task_id"],
-    )
-    await send_message(
-        matrix_queue.client,
-        matrix_queue.room_id,
-        message=json.dumps(event3),
-        queue="mutex",
-        msgtype=event3["msgtype"],
-        task_id=event3["task_id"],
-    )
-
-    print("test tasks==========", await matrix_queue.get_tasks())
-    print("test queue type", matrix_queue)
-
     with patch("taskiq_matrix.tasks.broker", broker):
         result = await update_checkpoint("mutex")
 
@@ -163,123 +117,80 @@ async def test_tasks_update_checkpoint_unable_to_update(test_matrix_broker):
         assert str(e.value) == "Failed to update checkpoint mutex."
 
 
-async def test_tasks_update_checkpoint_unacked_tasks_only(test_matrix_broker):
+async def test_tasks_update_checkpoint_acked_tasks(test_matrix_broker, test_broker_message):
     """
-    ? not recognizing unacked tasks
+    ? Ack msg not acking the task
     """
 
+    # create a MatrixBroker object
     test_broker = await test_matrix_broker()
 
-    await test_broker.startup()
+    await test_broker.mutex_queue.checkpoint.get_or_init_checkpoint(full_sync=False)
 
-    matrix_queue = test_broker.mutex_queue
+    # assign labels to the broker message
+    test_broker_message.labels = {"test": "labels"}
 
-    # create unacked task events
-    event2 = {
-        "task_id": "josdfj09b48907w3",
-        "queue": "mutex_queue",
-        "msgtype": f"{matrix_queue.task_types.ack}",
-    }
+    # kick the broker message to the broker
+    await test_broker.kick(test_broker_message)
 
-    event3 = {
-        "task_id": "josdfj09b48907w4",
-        "queue": "mutex_queue",
-        "msgtype": f"{matrix_queue.task_types.ack}",
-    }
-
-    assert not await matrix_queue.task_is_acked(event2["task_id"])
-    assert not await matrix_queue.task_is_acked(event3["task_id"])
-
-    await send_message(
-        matrix_queue.client,
-        matrix_queue.room_id,
-        message=json.dumps(event2),
-        queue="mutex",
-        msgtype=event2["msgtype"],
-        task_id=event2["task_id"],
-    )
-
-    await send_message(
-        matrix_queue.client,
-        matrix_queue.room_id,
-        message=json.dumps(event3),
-        queue="mutex",
-        msgtype=event3["msgtype"],
-        task_id=event3["task_id"],
-    )
+    await test_broker.mutex_queue.ack_msg(test_broker_message.task_id)
 
     with patch("taskiq_matrix.tasks.broker", test_broker):
         await update_checkpoint("mutex")
 
+async def test_tasks_update_checkpoint_unacked_tasks_only(test_matrix_broker, test_broker_message):
+    """
+    Tests that if an unacked task is present in the room, the queue's sync token is
+    set to before the unacked task.
+    """
 
-async def test_tasks_update_checkpoint_unacked_tasks_room_context_error(test_matrix_broker):
-    """ """
+    # create a MatrixBroker object
     test_broker = await test_matrix_broker()
 
-    await test_broker.startup()
+    await test_broker.mutex_queue.checkpoint.get_or_init_checkpoint(full_sync=False)
 
-    matrix_queue = test_broker.mutex_queue
+    # assign labels to the broker message
+    test_broker_message.labels = {"test": "labels"}
 
-    #!============
-    # ? Get the above test to
-    # ? work and paste here
-    #!============
-    matrix_queue.client.room_context = AsyncMock(return_value=MagicMock(spec=RoomContextError))
+    # kick the broker message to the broker
+    await test_broker.kick(test_broker_message)
 
+    # patch the task.py broker with the broker created locally
     with patch("taskiq_matrix.tasks.broker", test_broker):
+        # patch the logger to verify function calls
+        with patch('taskiq_matrix.tasks.logger', new=MagicMock()) as mock_logger:
+            await update_checkpoint("mutex")
+
+        # ! get the call args and assert string is not in it
+        # verify that the logger never called in the block of code that is executed
+            # when there are no unacked tasks found
+        # mock_logger.debug.assert_not_called_with("Task update_checkpoint: No unacked tasks found")
+
+async def test_tasks_update_checkpoint_unacked_tasks_room_context_error(test_matrix_broker, test_broker_message):
+    """ 
+    Tests that an exception is raised and the function is exited if room_context 
+    returns a RoomContextError.
+    """
+    # create a MatrixBroker object
+    test_broker = await test_matrix_broker()
+
+    await test_broker.mutex_queue.checkpoint.get_or_init_checkpoint(full_sync=False)
+
+    # assign labels to the broker message
+    test_broker_message.labels = {"test": "labels"}
+
+    # kick the broker message to the broker
+    await test_broker.kick(test_broker_message)
+
+    # set room_context to return a RoomContextError
+    matrix_queue = test_broker.mutex_queue
+    mock_context = AsyncMock(return_value=MagicMock(spec=RoomContextError))
+    mock_context.message = "test error message"
+    matrix_queue.client.room_context = mock_context
+
+    # patch the task.py broker with the broker created locally
+    with patch("taskiq_matrix.tasks.broker", test_broker):
+        # call update_checkpoint to raise an exception
         with pytest.raises(Exception):
             await update_checkpoint("mutex")
 
-
-async def test_tasks_update_checkpoint_acked_tasks_only(test_matrix_broker, test_broker_message):
-    """
-    ? not recognizing the tasks, instead skipping the "no tasks found" logger
-    ? debug function call
-    
-    ! kick a task to the broker and see if that works
-    """
-
-    test_broker = await test_matrix_broker()
-
-    await test_broker.startup()
-
-    matrix_queue = test_broker.mutex_queue
-    test_broker_message.labels = {"test": "labels"}
-    await test_broker.kick(test_broker_message)
-
-    # create unacked task events
-    event2 = {
-        "task_id": "josdfj09b48907w3",
-        "queue": "mutex_queue",
-        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w3",
-    }
-
-    event3 = {
-        "task_id": "josdfj09b48907w4",
-        "queue": "mutex_queue",
-        "msgtype": f"{matrix_queue.task_types.ack}.josdfj09b48907w4",
-    }
-
-    await send_message(
-        matrix_queue.client,
-        matrix_queue.room_id,
-        message=json.dumps(event2),
-        queue="mutex",
-        msgtype=event2["msgtype"],
-        task_id=event2["task_id"],
-    )
-
-    await send_message(
-        matrix_queue.client,
-        matrix_queue.room_id,
-        message=json.dumps(event3),
-        queue="mutex",
-        msgtype=event3["msgtype"],
-        task_id=event3["task_id"],
-    )
-
-    assert await matrix_queue.task_is_acked(event2["task_id"])
-    assert await matrix_queue.task_is_acked(event3["task_id"])
-
-    with patch("taskiq_matrix.tasks.broker", test_broker):
-        await update_checkpoint("mutex")

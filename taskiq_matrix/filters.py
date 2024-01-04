@@ -1,6 +1,9 @@
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from taskiq_matrix.matrix_queue import TaskTypes
 
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import BadEvent, Event, MessageDirection, RoomMessagesError, SyncError
@@ -130,7 +133,7 @@ async def run_sync_filter(
     attempts to deserialize json
     """
     if since is None:
-        client.next_batch = None # type:ignore
+        client.next_batch = None  # type:ignore
 
     res = await client.sync(timeout=timeout, sync_filter=filter, since=since)
     if isinstance(res, SyncError):
@@ -177,7 +180,9 @@ async def run_room_message_filter(
     return d, res.end
 
 
-async def get_first_unacked_task(tasks: list[Dict[str, Any]]) -> Dict[str, Any]:
+async def get_first_unacked_task(
+    tasks: list[Dict[str, Any]], task_types: "TaskTypes"
+) -> Dict[str, Any]:
     """
     Returns the first task object that has not been acknowledged.
     """
@@ -192,7 +197,7 @@ async def get_first_unacked_task(tasks: list[Dict[str, Any]]) -> Dict[str, Any]:
         if task_id not in task_order:
             task_order.append(task_id)
 
-        if task["content"]["msgtype"].startswith("taskiq.task"):
+        if task["content"]["msgtype"] == task_types.task:
             if task_id not in task_dict:
                 # add task to dictionary and initially mark it as unacknowledged
                 task_dict[task_id] = {"task_data": task, "acknowledged": False}
@@ -202,7 +207,7 @@ async def get_first_unacked_task(tasks: list[Dict[str, Any]]) -> Dict[str, Any]:
                 # simply update the task's data
                 task_dict[task_id]["task_data"] = task
 
-        elif task["content"]["msgtype"].startswith("taskiq.ack"):
+        elif task["content"]["msgtype"].startswith(task_types.ack):
             if task_id in task_dict:
                 # mark the task as acknowledged if it exists in the task dictionary
                 task_dict[task_id]["ack_data"] = task
