@@ -1,10 +1,11 @@
+import logging
 import os
 import pickle
 import socket
 from base64 import b64decode, b64encode
 from typing import Dict, Optional, TypeVar, Union
 
-from fractal import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import MessageDirection, RoomMessagesError
 from taskiq import AsyncResultBackend
 from taskiq.result import TaskiqResult
@@ -15,15 +16,20 @@ from .exceptions import (
     ResultDecodeError,
 )
 from .filters import create_filter, run_sync_filter
-from .log import Logger
 from .utils import send_message
 
 _ReturnType = TypeVar("_ReturnType")
 
 
+logger = logging.getLogger(__name__)
+
+
 class MatrixResultBackend(AsyncResultBackend):
     def __init__(
         self,
+        homeserver_url: str,
+        access_token: str,
+        room_id: str,
         result_ex_time: Optional[int] = None,
         result_px_time: Optional[int] = None,
     ):
@@ -33,13 +39,14 @@ class MatrixResultBackend(AsyncResultBackend):
         :param result_ex_time: expire time in seconds for result.
         :param result_px_time: expire time in milliseconds for result.
         """
+        self.room = room_id
+        self.homeserver_url = homeserver_url
+        self.access_token = access_token
         self.matrix_client = FractalAsyncClient(
-            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
-            access_token=os.environ["MATRIX_ACCESS_TOKEN"],
-            room_id=os.environ["MATRIX_ROOM_ID"],
+            homeserver_url=homeserver_url,
+            access_token=access_token,
+            room_id=self.room,
         )
-        self.room = os.environ["MATRIX_ROOM_ID"]
-        self.logger = Logger()
         self.result_ex_time = result_ex_time
         self.result_px_time = result_px_time
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
@@ -110,7 +117,7 @@ class MatrixResultBackend(AsyncResultBackend):
         """
         if not self.next_batch:
             res = await self.matrix_client.room_messages(
-                self.room, start="", limit=1, direction=MessageDirection.back
+                self.room, start="", limit=1, direction=MessageDirection.front
             )
             if not isinstance(res, RoomMessagesError):
                 self.next_batch = res.start
@@ -150,19 +157,19 @@ class MatrixResultBackend(AsyncResultBackend):
         try:
             result = result_object[self.room][0]
         except Exception as e:
-            self.logger.log(f"Error getting task result from Matrix {e}", "error")
+            logger.error(f"Error getting task result from Matrix {e}")
             raise ResultDecodeError()
 
         try:
             result = b64decode(result["body"]["task"]["value"])
         except Exception as e:
-            self.logger.log(f"Error loading result from returned task {e}", "error")
+            logger.error(f"Error loading result from returned task {e}")
             raise ResultDecodeError()
 
         try:
             taskiq_result: TaskiqResult[_ReturnType] = pickle.loads(result)
         except Exception as e:
-            self.logger.log(f"Error loading result as taskiq result: {e}", "error")
+            logger.error(f"Error loading result as taskiq result: {e}")
             raise ResultDecodeError()
 
         if not with_logs:

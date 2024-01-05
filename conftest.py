@@ -1,19 +1,22 @@
 import asyncio
 import json
 import os
-from typing import Awaitable, Callable, Generator
+from typing import Any, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
+from fractal.matrix import FractalAsyncClient
 
 import pytest
-from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse
+from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
+
 from taskiq_matrix.matrix_broker import (
     BroadcastQueue,
     MatrixBroker,
     MatrixQueue,
     ReplicatedQueue,
 )
+from taskiq_matrix.matrix_result_backend import MatrixResultBackend
 from taskiq_matrix.matrix_queue import Checkpoint
 
 try:
@@ -27,15 +30,14 @@ except KeyError:
 
 
 @pytest.fixture(scope="function")
-def matrix_client() -> Generator[AsyncClient, None, None]:
-    client = AsyncClient(homeserver=TEST_HOMESERVER_URL)
-    client.access_token = TEST_USER_ACCESS_TOKEN
+def matrix_client() -> Generator[FractalAsyncClient, None, None]:
+    client = FractalAsyncClient(access_token=TEST_USER_ACCESS_TOKEN)
     yield client
     asyncio.run(client.close())
 
 
 @pytest.fixture(scope="function")
-def new_matrix_room(matrix_client: AsyncClient):
+def new_matrix_room(matrix_client: FractalAsyncClient):
     """
     Creates a new room and returns its room id.
     """
@@ -52,6 +54,17 @@ def new_matrix_room(matrix_client: AsyncClient):
 
 
 @pytest.fixture(scope="function")
+def test_matrix_result_backend(new_matrix_room):
+    """
+    Creates a MatrixResultBackend object
+    """
+    async def create():
+        room_id = await new_matrix_room()
+        return MatrixResultBackend(homeserver_url=os.environ["MATRIX_HOMESERVER_URL"], access_token=os.environ["MATRIX_ACCESS_TOKEN"], room_id=room_id)
+
+    return create
+
+@pytest.fixture(scope="function")
 def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
     async def create():
         """
@@ -64,12 +77,12 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
 
         # set the broker's room id
         broker.room_id = room_id
+        broker.with_matrix_config(
+            room_id, os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
+        )
 
-        # recreate the broker's queues using the new room id
-        broker.mutex_queue = MatrixQueue(broker.mutex_queue.name, room_id=room_id)
-        broker.device_queue = MatrixQueue(broker.device_queue.name, room_id=room_id)
-        broker.broadcast_queue = BroadcastQueue(broker.broadcast_queue.name, room_id=room_id)
-        broker.replication_queue = ReplicatedQueue(broker.replication_queue.name, room_id=room_id)
+        # use room_id for the queues
+        broker._init_queues()
 
         return broker
 
@@ -98,20 +111,33 @@ def test_broker_message():
 
 
 @pytest.fixture(scope="function")
-def test_checkpoint():
-    mock_client_parameter = MagicMock(spec=AsyncClient)
+def test_checkpoint(test_room_id):
+    mock_client_parameter = MagicMock(spec=FractalAsyncClient)
     mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id="test room"
+        content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
     )
-    return Checkpoint(type="abc", room_id="abc", client=mock_client_parameter)
-
-
-# FIXME: Add a Matrix result backend fixture. The fixture should look very similar
-#        to the matrix_client fixture above. The only difference is that the
-#        result backend fixture should return a MatrixResultBackend instance.
-#        Make sure to call the shutdown method on the result backend after yielding!
-
+    return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
 
 @pytest.fixture
 def test_room_id() -> str:
     return TEST_ROOM_ID
+
+
+@pytest.fixture
+def unknown_event_factory() -> Callable[[str, str], UnknownEvent]:
+    """
+    Returns a mock Matrix event class.
+    """
+
+    def create_test_event(body: str, sender: str) -> UnknownEvent:
+        return UnknownEvent(
+            source={
+                "event_id": "test_event_id",
+                "sender": sender,
+                "origin_server_ts": 0,
+                "content": {"type": "test.event", "body": body},
+            },
+            type="test_event",
+        )
+
+    return create_test_event
