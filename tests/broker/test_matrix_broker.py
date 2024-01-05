@@ -850,35 +850,129 @@ async def test_matrix_broker_kick_device_queue_valid_device_label(
         queue='device'
     )
 
-async def test_matrix_broker_listen_no_tasks(test_matrix_broker):
+async def test_matrix_broker_listen_no_tasks(test_iterable_tasks, test_matrix_broker):
     """
+    Tests that if there are no unacked tasks, the queue's checkpoint since token is
+    updated to the client's next_batch value.
     """
+
+    # create a matrix broker object
     broker = await test_matrix_broker()
 
+    # store the next_batches of the queue's clients for comparison
     test_device_since = broker.device_queue.client.next_batch
     test_broadcast_since = broker.broadcast_queue.client.next_batch
     test_mutex_since = broker.mutex_queue.client.next_batch
     test_replication_since = broker.replication_queue.client.next_batch
 
+    # create an iterable of 0 tasks
+    tasks_iterator = test_iterable_tasks(0)
     tasks = []
 
-    with patch('taskiq_matrix.matrix_broker.MatrixBroker.get_tasks', return_value=[]):
+    # patch get_tasks to return the iterable that was created locally
+    with patch('taskiq_matrix.matrix_broker.MatrixBroker.get_tasks', return_value=tasks_iterator):
         with patch('taskiq_matrix.matrix_broker.logger') as mock_logger:
+            # call the function and store the yielded tasks
             async def listen_wrapper():
                 async for task in broker.listen():
                     tasks.append(task)
                 
             await listen_wrapper()
             
+    # verify that the list of tasks is empty
     assert tasks == []
+
+    # verify the logger.debug call was only made once
     mock_logger.debug.assert_called_once()
 
+    # verify that the checkpoint since tokens match what is expected
     assert broker.device_queue.checkpoint.since_token == test_device_since
     assert broker.broadcast_queue.checkpoint.since_token == test_broadcast_since
     assert broker.mutex_queue.checkpoint.since_token == test_mutex_since
     assert broker.replication_queue.checkpoint.since_token == test_replication_since
 
+async def test_matrix_broker_listen_tasks_present(test_iterable_tasks, test_matrix_broker):
+    """
+    Tests that listen() yields the same number of tasks that is returned by get_tasks()
+    """
 
+    # create a matrix broker object
+    broker = await test_matrix_broker()
+
+    # create an iterable of tasks
+    num_tasks = 5
+    tasks_iterator = test_iterable_tasks(num_tasks)
+    tasks = []
         
+    # patch get_tasks to return the iterable that was created locally
+    with patch('taskiq_matrix.matrix_broker.MatrixBroker.get_tasks', return_value=tasks_iterator):
+        # call the function and store the yielded tasks
+        async def listen_wrapper():
+            async for task in broker.listen():
+                tasks.append(task)
+            
+        await listen_wrapper()
+            
+    # verify that the number of tasks received is the same as the number of tasks that
+    # were in the broker
+    assert len(tasks) == num_tasks
 
+async def test_matrix_broker_listen_lock_error(test_iterable_tasks, test_matrix_broker):
+    """
+    Tests that an LockAcquireError is caught and logged when there is an error acquiring
+    a lock.
+    """
+
+    # create a matrix broker object
+    broker = await test_matrix_broker()
+
+    # create an iterable of tasks
+    num_tasks = 5
+    tasks_iterator = test_iterable_tasks(num_tasks)
+    tasks = []
+
+    # set yield_task to raise a LockAcquireError
+    broker.mutex_queue.yield_task = AsyncMock(side_effect=LockAcquireError())
+        
+    # patch get_tasks to return the iterable that was created locally
+    with patch('taskiq_matrix.matrix_broker.MatrixBroker.get_tasks', return_value=tasks_iterator):
+        with patch('taskiq_matrix.matrix_broker.logger') as mock_logger:
+            async def listen_wrapper():
+                async for task in broker.listen():
+                    tasks.append(task)
+                    
+            await listen_wrapper()
+
+    # verify that logger.error was called and the number of tasks are the same
+    call_count = mock_logger.error.call_count
+    assert call_count == num_tasks
+
+async def test_matrix_broker_listen_yield_error(test_iterable_tasks, test_matrix_broker):
+    """
+    Tests that an exception caught and logged when there is an error yielding a task.
+    """
+
+    # create a matrix broker object
+    broker = await test_matrix_broker()
+
+    # create an iterable of tasks
+    num_tasks = 5
+    tasks_iterator = test_iterable_tasks(num_tasks)
+    tasks = []
+
+    # set yield_task to raise an Exception
+    broker.mutex_queue.yield_task = AsyncMock(side_effect=Exception())
+        
+    # patch get_tasks to return the iterable that was created locally
+    with patch('taskiq_matrix.matrix_broker.MatrixBroker.get_tasks', return_value=tasks_iterator):
+        with patch('taskiq_matrix.matrix_broker.logger') as mock_logger:
+            async def listen_wrapper():
+                async for task in broker.listen():
+                    tasks.append(task)
+                    
+            await listen_wrapper()
+
+    # verify that logger.error was called and the number of tasks are the same
+    call_count = mock_logger.error.call_count
+    assert call_count == num_tasks
 
