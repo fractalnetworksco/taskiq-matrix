@@ -158,6 +158,7 @@ class MatrixLock:
             wait (bool): whether to wait for the lock to be available
         """
         lock_types = [f"fn.lock.acquire.{key}", f"fn.lock.release.{key}"]
+        logger.error(f"Next batch is {self.next_batch}")
         if not self.next_batch:
             self.next_batch = await self.get_latest_sync_token()
             MatrixLock.next_batch = self.next_batch
@@ -187,7 +188,10 @@ class MatrixLock:
             return False
 
     async def filter(
-        self, filter: dict, timeout: int = 3000, since: Optional[str] = None, **kwargs
+        self,
+        filter: dict,
+        timeout: int = 3000,
+        since: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         execute a filter with the client, optionally filter message body by kwargs
@@ -199,7 +203,6 @@ class MatrixLock:
             raise Exception(res.message)
 
         rooms = list(res.rooms.join.keys())
-        filter_keys = kwargs.keys()
         d = {}
         for room in rooms:
             d[room] = list(
@@ -211,10 +214,6 @@ class MatrixLock:
                     ],
                 )
             )
-        if kwargs:
-            # filter out all keys by value from kwargs
-            for key in filter_keys:
-                d = {k: [i for i in v if i.get(key) == kwargs[key]] for k, v in d.items()}
         return d
 
     async def get_latest_sync_token(self) -> str:
