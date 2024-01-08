@@ -4,6 +4,7 @@ import os
 from typing import Any, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
+from fractal.matrix import FractalAsyncClient
 
 import pytest
 from fractal.matrix import FractalAsyncClient
@@ -155,7 +156,6 @@ def test_checkpoint(test_room_id):
         content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
     )
     return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
-
 
 @pytest.fixture
 def test_room_id() -> str:
