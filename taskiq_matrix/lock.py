@@ -158,7 +158,6 @@ class MatrixLock:
             wait (bool): whether to wait for the lock to be available
         """
         lock_types = [f"fn.lock.acquire.{key}", f"fn.lock.release.{key}"]
-        logger.error(f"Next batch is {self.next_batch}")
         if not self.next_batch:
             self.next_batch = await self.get_latest_sync_token()
             MatrixLock.next_batch = self.next_batch
