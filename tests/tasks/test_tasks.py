@@ -1,10 +1,10 @@
 import json
-import time
 import os
-from unittest.mock import AsyncMock, MagicMock, patch, Mock
+import time
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from nio import MessageDirection, RoomMessagesResponse
+from nio import MessageDirection, RoomContextResponse, RoomMessagesResponse
 from taskiq_matrix.matrix_broker import MatrixBroker
 from taskiq_matrix.tasks import (
     QueueDoesNotExist,
@@ -81,22 +81,46 @@ async def test_tasks_update_checkpoint_no_tasks(test_matrix_broker):
     assert result
 
 
-@pytest.mark.skip(reason="not returning acks, might be related to the synapse issue")
-async def test_tasks_update_checkpoint_mixed_tasks(test_matrix_broker):
+@pytest.mark.integtest
+async def test_tasks_update_checkpoint_mixed_tasks(
+    test_matrix_broker, test_multiple_broker_message
+):
     """
-    #? This might be an issue with the same Synapse-glob issue not returning acks
+    Tests that if there are unacked tasks in the queue, the queue's checkpoint is
+    updated to before the first unacked task.
     """
 
-    broker = await test_matrix_broker()
-    matrix_queue = broker.mutex_queue
+    test_broker = await test_matrix_broker()
+    messages = await test_multiple_broker_message(3)
+    starting_checkpoint = await test_broker.mutex_queue.checkpoint.get_or_init_checkpoint(
+        full_sync=False
+    )
 
-    with patch("taskiq_matrix.tasks.broker", broker):
-        result = await update_checkpoint("mutex")
+    # assign labels to the broker message
+    message_1 = messages[0]
+    message_2 = messages[1]
+    message_3 = messages[2]
+
+    # kick the broker message to the broker
+    await test_broker.kick(message_1)
+    await test_broker.kick(message_2)
+    await test_broker.kick(message_3)
+
+    await test_broker.mutex_queue.ack_msg(message_1.task_id)
+    await test_broker.mutex_queue.ack_msg(message_2.task_id)
+
+    with patch("taskiq_matrix.tasks.broker", test_broker):
+        with patch("taskiq_matrix.tasks.logger") as mock_logger:
+            result = await update_checkpoint("mutex")
+
+    assert test_broker.mutex_queue.checkpoint.since_token != starting_checkpoint
+    mock_logger.debug.assert_not_called()
 
 
 async def test_tasks_update_checkpoint_unable_to_update(test_matrix_broker):
     """
-    Tests that an exception is raised if the
+    Tests that an exception is raised if there is an error in setting the queue's
+    checkpoint.
     """
 
     # create a broker fixture
@@ -117,15 +141,17 @@ async def test_tasks_update_checkpoint_unable_to_update(test_matrix_broker):
         assert str(e.value) == "Failed to update checkpoint mutex."
 
 
+@pytest.mark.integtest
 async def test_tasks_update_checkpoint_acked_tasks(test_matrix_broker, test_broker_message):
     """
-    ? Ack msg not acking the task
+    Tests that the queue's checkpoint is updated when there are no unacked tasks.
     """
 
     # create a MatrixBroker object
     test_broker = await test_matrix_broker()
-
-    await test_broker.mutex_queue.checkpoint.get_or_init_checkpoint(full_sync=False)
+    starting_checkpoint = await test_broker.mutex_queue.checkpoint.get_or_init_checkpoint(
+        full_sync=False
+    )
 
     # assign labels to the broker message
     test_broker_message.labels = {"test": "labels"}
@@ -136,9 +162,17 @@ async def test_tasks_update_checkpoint_acked_tasks(test_matrix_broker, test_brok
     await test_broker.mutex_queue.ack_msg(test_broker_message.task_id)
 
     with patch("taskiq_matrix.tasks.broker", test_broker):
-        await update_checkpoint("mutex")
+        with patch("taskiq_matrix.tasks.logger") as mock_logger:
+            await update_checkpoint("mutex")
 
-async def test_tasks_update_checkpoint_unacked_tasks_only(test_matrix_broker, test_broker_message):
+        mock_logger.debug.assert_called_with("Task update_checkpoint: No unacked tasks found")
+        assert test_broker.mutex_queue.checkpoint.since_token != starting_checkpoint
+
+
+@pytest.mark.integtest
+async def test_tasks_update_checkpoint_unacked_tasks_only(
+    test_matrix_broker, test_broker_message
+):
     """
     Tests that if an unacked task is present in the room, the queue's sync token is
     set to before the unacked task.
@@ -158,17 +192,20 @@ async def test_tasks_update_checkpoint_unacked_tasks_only(test_matrix_broker, te
     # patch the task.py broker with the broker created locally
     with patch("taskiq_matrix.tasks.broker", test_broker):
         # patch the logger to verify function calls
-        with patch('taskiq_matrix.tasks.logger', new=MagicMock()) as mock_logger:
+        with patch("taskiq_matrix.tasks.logger") as mock_logger:
             await update_checkpoint("mutex")
 
-        # ! get the call args and assert string is not in it
         # verify that the logger never called in the block of code that is executed
-            # when there are no unacked tasks found
-        # mock_logger.debug.assert_not_called_with("Task update_checkpoint: No unacked tasks found")
+        # when there are no unacked tasks found
+        mock_logger.debug.assert_not_called()
 
-async def test_tasks_update_checkpoint_unacked_tasks_room_context_error(test_matrix_broker, test_broker_message):
-    """ 
-    Tests that an exception is raised and the function is exited if room_context 
+
+@pytest.mark.integtest
+async def test_tasks_update_checkpoint_unacked_tasks_room_context_error(
+    test_matrix_broker, test_broker_message
+):
+    """
+    Tests that an exception is raised and the function is exited if room_context
     returns a RoomContextError.
     """
     # create a MatrixBroker object
@@ -193,4 +230,3 @@ async def test_tasks_update_checkpoint_unacked_tasks_room_context_error(test_mat
         # call update_checkpoint to raise an exception
         with pytest.raises(Exception):
             await update_checkpoint("mutex")
-
