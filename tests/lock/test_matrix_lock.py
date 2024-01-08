@@ -1,4 +1,7 @@
+<<<<<<< HEAD
 
+=======
+>>>>>>> 41de410d636b7bcc8af37b09bb5a62af1ca3dd3d
 import json
 from base64 import b64encode
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
