@@ -1,10 +1,6 @@
-<<<<<<< HEAD
-
-=======
->>>>>>> 41de410d636b7bcc8af37b09bb5a62af1ca3dd3d
 import json
 from base64 import b64encode
-from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch, NonCallableMagicMock
 
 import pytest
 from fractal.matrix.async_client import FractalAsyncClient
@@ -368,6 +364,46 @@ async def test_matrix_lock_lock_functional_test(new_matrix_room):
         # verify that the lock id yielded by lock() matches the lock_id
         assert lock_id == "test_lock_id"
 
+async def test_matrix_lock_acquire_lock_not_acquired(new_matrix_room):
+    """
+    Tests that a lock is not acquired if a filter is returned with a different room_id
+    than what is in the lock
+    """
+    room_id = await new_matrix_room()
+
+    # create a lock object
+    lock = MatrixLock(room_id=room_id)
+    lock.next_batch = await lock.get_latest_sync_token()
+
+    # mock the lock's filter function and set its return values
+    mock_filter = AsyncMock()
+    second_call = {
+        lock.room_id: [
+            {
+                "type": "fn.lock.acquire.None",
+                "lock_id": "not_the_same_lock_id",
+            }
+        ]
+    }
+    mock_filter.side_effect = [{}, second_call]
+    lock.filter = mock_filter
+
+    # patch the logger to verify function calls
+    with patch("taskiq_matrix.lock.logger", new=NonCallableMagicMock) as mock_logger:
+        mock_logger.debug = MagicMock()
+        mock_logger.info = MagicMock()
+        mock_logger.error = MagicMock()
+
+        # call _acquire_lock()
+        result = await lock._acquire_lock()
+
+        # verify that it returned false
+        assert not result
+
+        # verify the logger.info function call, signifying that the function returned
+        # False from the else block
+        mock_logger.info.assert_called_once()
+    MatrixLock.next_batch = None
 
 async def test_matrix_lock_acquire_lock_existing_next_batch(new_matrix_room):
     """
@@ -462,48 +498,6 @@ async def test_matrix_lock_acquire_lock_room_id_in_res():
     result = await lock._acquire_lock()
     assert result
     mock_send_message.assert_called_once()
-    MatrixLock.next_batch = None
-
-#! this is the one
-@pytest.mark.skip
-async def test_matrix_lock_acquire_lock_not_acquired(new_matrix_room):
-    """
-    Tests that a lock is not acquired if a filter is returned with a different room_id
-    than what is in the lock
-    """
-    room_id = await new_matrix_room()
-
-    # create a lock object
-    lock = MatrixLock(room_id=room_id)
-
-    # mock the lock's filter function and set its return values
-    mock_filter = AsyncMock()
-    second_call = {
-        lock.room_id: [
-            {
-                "type": "fn.lock.acquire.None",
-                "lock_id": "not_the_same_lock_id",
-            }
-        ]
-    }
-    mock_filter.side_effect = [{}, second_call]
-    lock.filter = mock_filter
-
-    # patch the logger to verify function calls
-    with patch("taskiq_matrix.lock.logger", new=MagicMock) as mock_logger:
-        mock_logger.debug = MagicMock()
-        mock_logger.info = MagicMock()
-        mock_logger.error = MagicMock()
-
-        # call _acquire_lock()
-        result = await lock._acquire_lock()
-
-        # verify that it returned false
-        assert not result
-
-        # verify the logger.info function call, signifying that the function returned
-        # False from the else block
-        mock_logger.info.assert_called_once()
     MatrixLock.next_batch = None
 
 
