@@ -4,20 +4,14 @@ import os
 from typing import Any, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
-from fractal.matrix import FractalAsyncClient
 
 import pytest
+from fractal.matrix import FractalAsyncClient
 from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
-
-from taskiq_matrix.matrix_broker import (
-    BroadcastQueue,
-    MatrixBroker,
-    MatrixQueue,
-    ReplicatedQueue,
-)
+from taskiq_matrix.matrix_broker import MatrixBroker
+from taskiq_matrix.matrix_queue import Checkpoint, Task
 from taskiq_matrix.matrix_result_backend import MatrixResultBackend
-from taskiq_matrix.matrix_queue import Checkpoint
 
 try:
     TEST_HOMESERVER_URL = os.environ["MATRIX_HOMESERVER_URL"]
@@ -58,11 +52,30 @@ def test_matrix_result_backend(new_matrix_room):
     """
     Creates a MatrixResultBackend object
     """
+
     async def create():
         room_id = await new_matrix_room()
-        return MatrixResultBackend(homeserver_url=os.environ["MATRIX_HOMESERVER_URL"], access_token=os.environ["MATRIX_ACCESS_TOKEN"], room_id=room_id)
+        return MatrixResultBackend(
+            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
+            access_token=os.environ["MATRIX_ACCESS_TOKEN"],
+            room_id=room_id,
+        )
 
     return create
+
+
+class MockAsyncIterable:
+    def __init__(self, items):
+        self.items = items
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self.items:
+            raise StopAsyncIteration
+        return self.items.pop(0)
+
 
 @pytest.fixture(scope="function")
 def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
@@ -118,6 +131,7 @@ def test_checkpoint(test_room_id):
     )
     return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
 
+
 @pytest.fixture
 def test_room_id() -> str:
     return TEST_ROOM_ID
@@ -129,15 +143,48 @@ def unknown_event_factory() -> Callable[[str, str], UnknownEvent]:
     Returns a mock Matrix event class.
     """
 
-    def create_test_event(body: str, sender: str) -> UnknownEvent:
+    def create_test_event(body: str, sender: str, msgtype: str = "test.event") -> UnknownEvent:
         return UnknownEvent(
             source={
                 "event_id": "test_event_id",
                 "sender": sender,
                 "origin_server_ts": 0,
-                "content": {"type": "test.event", "body": body},
+                "content": {"msgtype": msgtype, "body": body, "sender": sender},
             },
-            type="test_event",
+            type=msgtype,
         )
 
     return create_test_event
+
+
+@pytest.fixture
+def test_iterable_tasks(unknown_event_factory):
+    """
+    get_tasks() interable
+    """
+
+    def factory(num_tasks: int):
+        tasks = []
+        for i in range(num_tasks):
+            event = unknown_event_factory(
+                {
+                    "queue": "mutex",
+                    "task_id": str(uuid4()),
+                    "msgtype": "taskiq.mutex.task",
+                    "task": json.dumps(
+                        {
+                            "name": "task_fixture",
+                            "cron": "* * * * *",
+                            "labels": {"task_id": "mutex_checkpoint", "queue": "mutex"},
+                            "args": ["mutex"],
+                            "kwargs": {},
+                        }
+                    ),
+                },
+                "test_sender",
+            )
+
+            tasks.append(Task(**event.source['content']))
+
+        return MockAsyncIterable([tasks])
+    return factory
