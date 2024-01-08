@@ -579,47 +579,6 @@ async def test_matrix_broker_kick_functional_test(test_matrix_broker, test_broke
                     queue=matrix_broker.mutex_queue.name,
                 )
 
-@pytest.mark.skip(reason="run_sync_filter no longer called")
-async def test_matrix_broker_kick_sync_filter(test_matrix_broker, test_broker_message):
-    """
-    """
-
-    # create a MatrixBroker object
-    matrix_broker: MatrixBroker = await test_matrix_broker()
- 
-    # copy the empty filter dictionary from the matrix_broker.py file
-    test_empty_filter = {
-        "presence": {"limit": 0, "types": []},
-        "account_data": {"limit": 0, "types": []},
-        "room": {
-            "rooms": [],
-            "state": {"types": [], "limit": 0},
-            "timeline": {"types": [], "limit": 0},
-            "account_data": {"limit": 0, "types": []},
-            "ephemeral": {"limit": 0, "types": []},
-        },
-    }
-
-    mock_backend_result = AsyncMock(spec=MatrixResultBackend)
-    mock_backend_result.matrix_client = AsyncMock()
-    mock_backend_result.matrix_client.next_batch = False
-    matrix_broker.result_backend = mock_backend_result
-
-
-    with patch("taskiq_matrix.matrix_broker.run_sync_filter", callable=AsyncMock()) as mock_sync_filter:
-        with patch("taskiq_matrix.matrix_broker.send_message", callable=AsyncMock()) as mock_message:
-
-            await matrix_broker.kick(test_broker_message)
-
-            mock_sync_filter.assert_called_once_with(
-                mock_backend_result.matrix_client,
-                test_empty_filter,
-                timeout=0,
-            )
-
-            mock_message.assert_called_once()
-
-
 @pytest.mark.integtest
 async def test_matrix_broker_kick_no_task_id(test_matrix_broker, test_broker_message):
     """
