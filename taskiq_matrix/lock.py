@@ -187,7 +187,10 @@ class MatrixLock:
             return False
 
     async def filter(
-        self, filter: dict, timeout: int = 3000, since: Optional[str] = None,
+        self,
+        filter: dict,
+        timeout: int = 3000,
+        since: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         execute a filter with the client, optionally filter message body by kwargs
