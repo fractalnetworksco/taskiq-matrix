@@ -48,12 +48,12 @@ def new_matrix_room(matrix_client: FractalAsyncClient):
 
 
 @pytest.fixture(scope="function")
-def test_matrix_result_backend(new_matrix_room):
+def test_matrix_result_backend(new_matrix_room) -> Callable[[], Awaitable[MatrixResultBackend]]:
     """
     Creates a MatrixResultBackend object
     """
 
-    async def create():
+    async def create() -> MatrixResultBackend:
         room_id = await new_matrix_room()
         return MatrixResultBackend(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
@@ -184,7 +184,8 @@ def test_iterable_tasks(unknown_event_factory):
                 "test_sender",
             )
 
-            tasks.append(Task(**event.source['content']))
+            tasks.append(Task(**event.source["content"]))
 
         return MockAsyncIterable([tasks])
+
     return factory

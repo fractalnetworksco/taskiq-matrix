@@ -507,6 +507,40 @@ async def test_matrix_result_backend_get_result_with_logs(test_matrix_result_bac
     await result_backend.shutdown()
 
 
+async def test_matrix_result_backend_get_result_uses_cached_result(
+    test_matrix_result_backend,
+):
+    """
+    Tests that is_result_ready returns False if there is a result that is set but it is
+    given a different task_id
+    """
+
+    # create a MatrixBackendResult object from a fixture
+    test_backend = await test_matrix_result_backend()
+
+    # create a TaskiqResult object and set it
+    test_task_id = str(uuid4())
+    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    await test_backend.set_result(test_task_id, result)
+
+    serialized_result = b64encode(pickle.dumps(result)).decode()
+
+    response = {test_backend.room: [{"body": {"task": {"value": serialized_result}}}]}
+
+    with patch(
+        "taskiq_matrix.matrix_result_backend.run_room_message_filter",
+        new=AsyncMock(return_value=(response, None)),
+    ) as mock_run_room_message_filter:
+        result = await test_backend.get_result(test_task_id)
+        assert result
+        result = await test_backend.get_result(test_task_id)
+        assert result
+
+        mock_run_room_message_filter.assert_called_once()
+
+    await test_backend.shutdown()
+
+
 async def test_matrix_result_backend_get_result_result_available(test_matrix_result_backend):
     """
     Tests that get_result returns the same TaskiqResult object that was set using set_result

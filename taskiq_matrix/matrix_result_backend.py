@@ -4,7 +4,7 @@ import pickle
 import socket
 from base64 import b64decode, b64encode
 from functools import lru_cache
-from typing import Dict, Optional, TypeVar, Union
+from typing import Any, Dict, Optional, TypeVar, Union
 
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import MessageDirection, RoomMessagesError
@@ -113,18 +113,18 @@ class MatrixResultBackend(AsyncResultBackend):
             msgtype=f"taskiq.result.{task_id}",
         )
 
-    async def is_result_ready(self, task_id: str) -> bool:
+    @lru_cache(maxsize=512)
+    async def _fetch_result_from_matrix(self, task_id: str) -> dict[str, Any]:
         """
-        Returns whether the result is ready.
+        Fetches task result from matrix.
 
         :param task_id: ID of the task.
-
-        :returns: True if the result is ready else False.
+        :return: list of task results.
         """
-        # FIXME: starting from the beginning of the room is not ideal
-        # if the room is large, this will take a long time. Should probably
-        # instead start from the most recent message backwards
         if not self.next_batch:
+            # FIXME: starting from the beginning of the room is not ideal
+            # if the room is large, this will take a long time. Should probably
+            # instead start from the most recent message backwards
             res = await self.matrix_client.room_messages(
                 self.room, start="", limit=1, direction=MessageDirection.front
             )
@@ -145,6 +145,17 @@ class MatrixResultBackend(AsyncResultBackend):
         result, _ = await run_room_message_filter(
             self.matrix_client, self.room, message_filter, since=self.matrix_client.next_batch
         )
+        return result
+
+    async def is_result_ready(self, task_id: str) -> bool:
+        """
+        Returns whether the result is ready.
+
+        :param task_id: ID of the task.
+
+        :returns: True if the result is ready else False.
+        """
+        result = await self._fetch_result_from_matrix(task_id)
         return True if result.get(self.room) else False
 
     async def get_result(
@@ -162,26 +173,7 @@ class MatrixResultBackend(AsyncResultBackend):
         :raises ResultDecodeError: if there is an error decoding the result.
         :return: task's return value.
         """
-
-        # FIXME: starting from the beginning of the room is not ideal
-        # if the room is large, this will take a long time. Should probably
-        # instead start from the most recent message backwards
-        if not self.next_batch:
-            self.next_batch = "s0_0_0_0_0_0_0_0_0_0"
-            self.matrix_client.next_batch = "s0_0_0_0_0_0_0_0_0_0"
-
-        message_filter = create_room_message_filter(self.room, types=[f"taskiq.result.{task_id}"])
-        # cache the next batch token from kick so we can use it later when getting the result
-        # need to do this because when we sync below here, the client's next_batch token will
-        # be updated to the latest sync token, which will be after the result we're looking for
-
-        # FIXME: need to loop through this until the function below does not return
-        # a sync token. This will ensure that the result is not at all in the timeline.
-        # right now we only check the first 100 messages in the timeline, which is not
-        # enough to ensure that the result is not there.
-        result_object, _ = await run_room_message_filter(
-            self.matrix_client, self.room, message_filter, since=self.matrix_client.next_batch
-        )
+        result_object = await self._fetch_result_from_matrix(task_id)
         # TODO: handle waiting for a number of results for a task
 
         try:
