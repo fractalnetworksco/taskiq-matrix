@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import AsyncClient, SyncError, SyncResponse
+from taskiq_matrix.matrix_queue import TaskTypes
 
 from taskiq_matrix.filters import create_filter, get_first_unacked_task, run_sync_filter
 
@@ -141,24 +142,28 @@ async def test_filters_get_first_unacked_task_mixed_tasks():
     inserted into the list to test conditional statements.
     """
 
+    # create a TaskType object
+    t_types = TaskTypes('test')
+
     # create a list of unacknowledged task dictionaries
     unacknowledged_tasks = [
-        {"content": {"body": {"task_id": 1}, "msgtype": "taskiq.task"}},
-        {"content": {"body": {"task_id": 2}, "msgtype": "taskiq.task"}},
-        {"content": {"body": {"task_id": 2}, "msgtype": "taskiq.task"}},
+        {"content": {"body": {"task_id": 1}, "msgtype": t_types.task}},
+        {"content": {"body": {"task_id": 2}, "msgtype": t_types.task}},
+        {"content": {"body": {"task_id": 2}, "msgtype": t_types.task}},
     ]
 
     # create a list of acknowledged task dictionaries
     acknowledged_tasks = [
-        {"content": {"body": {"task_id": 2}, "msgtype": "taskiq.ack"}},
-        {"content": {"body": {"task_id": 5}, "msgtype": "taskiq.ack"}},
+        {"content": {"body": {"task_id": 2}, "msgtype": t_types.ack}},
+        {"content": {"body": {"task_id": 5}, "msgtype": t_types.ack}},
     ]
 
     # combine the two lists into a list of tasks
     tasks = unacknowledged_tasks + acknowledged_tasks
 
+
     # call the get_first_unacked_task function
-    result = await get_first_unacked_task(tasks)
+    result = await get_first_unacked_task(tasks, t_types)
 
     # assert that the task that is returned is the first task in the list
     assert (
@@ -172,16 +177,19 @@ async def test_filters_get_first_unacked_task_only_acked_tasks():
     Tests that no tasks are returned if no unacked tasks are passed to it
     """
 
+    # create a TaskType object
+    t_types = TaskTypes('test')
+
     # create a dictionary of acknowledged tasks
     acknowledged_tasks = [
-        {"content": {"body": {"task_id": 1}, "msgtype": "taskiq.ack"}},
-        {"content": {"body": {"task_id": 2}, "msgtype": "taskiq.ack"}},
+        {"content": {"body": {"task_id": 1}, "msgtype": t_types.ack}},
+        {"content": {"body": {"task_id": 2}, "msgtype": t_types.ack}},
     ]
 
     tasks = acknowledged_tasks
 
     # call the get_first_unacked_task function
-    result = await get_first_unacked_task(tasks)
+    result = await get_first_unacked_task(tasks, t_types)
 
     # verify that an empty list is returned
     assert result == {}
@@ -220,3 +228,28 @@ async def test_filters_create_filter_no_limit():
     # and that limit is not in the dictionary
     assert "limit" not in filter["room"]["timeline"]
     assert filter["room"]["rooms"][0] == test_room_id
+
+async def test_filters_create_filter_true_room_event_filter():
+    """
+    Tests that only the filter room timeline dictionary is returned along with the request
+    id if room_event_filter is passed as True
+    """
+
+    # create random room id variable
+    test_room_id = str(uuid4())
+
+    # call create_filter and store the dictionary passing None for the limit
+    filter = create_filter(room_id=test_room_id, room_event_filter=True)
+
+    # verify what is found in the filter
+    assert "types" in filter
+    assert "not_types" in filter
+    assert "not_senders" in filter
+    assert "request_id" in filter
+
+    # verify what is not found in the filter
+    assert "presence" not in filter
+    assert "account_data" not in filter
+    assert "room" not in filter
+
+
