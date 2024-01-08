@@ -42,7 +42,7 @@ async def update_checkpoint(queue_name: str) -> bool:
     # gets all tasks and acks since the checkpoint (including their event ids)
     # TODO: handle using results. Once we use them, we can use task_types.all()
     room_filter = create_filter(
-        queue.room_id, types=[queue.task_types.task, queue.task_types.ack]
+        queue.room_id, types=[queue.task_types.task, f"{queue.task_types.ack}.*"]
     )
     tasks = await run_sync_filter(
         queue.client,
@@ -55,7 +55,7 @@ async def update_checkpoint(queue_name: str) -> bool:
     # pull tasks for the broker's room
     tasks = tasks.get(queue.room_id)
     if tasks:
-        unacked_task = await get_first_unacked_task(tasks)
+        unacked_task = await get_first_unacked_task(tasks, queue.task_types)
         if unacked_task:
             event_id = unacked_task["event_id"]
 

@@ -122,6 +122,31 @@ def test_broker_message():
     # create the BrokerMessage object
     return BrokerMessage(task_id=task_id, task_name="test_name", message=message_bytes, labels={})
 
+@pytest.fixture
+def test_multiple_broker_message():
+    """
+    Create a BrokerMessage Fixture
+    """
+    async def create(num_messages: int):
+        messages = []
+        for i in range(num_messages):
+            task_id = str(uuid4())
+            message = {
+                "task_id": task_id,
+                "foo": "bar",
+            }
+
+            # convert the message into json
+            message_string = json.dumps(message)
+
+            # encode the message into message bytes
+            message_bytes = message_string.encode("utf-8")
+
+            messages.append(BrokerMessage(task_id=task_id, task_name="test_name", message=message_bytes, labels={}))
+
+        # create the BrokerMessage object
+        return messages
+    return create
 
 @pytest.fixture(scope="function")
 def test_checkpoint(test_room_id):
