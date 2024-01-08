@@ -22,7 +22,6 @@ async def test_matrix_room_schedule_constructor_error():
         test_schedule = MatrixRoomScheduleSource(broker)
 
 
-@pytest.mark.integtest  # depends on parent class' startup function
 async def test_matrix_room_schedule_startup(test_matrix_broker):
     """
     Tests that the startup() function sets the schedule's 'initial' property
@@ -44,7 +43,6 @@ async def test_matrix_room_schedule_startup(test_matrix_broker):
     assert test_schedule.initial == True
 
 
-@pytest.mark.integtest  # depends on parent class' startup function
 async def test_matrix_room_schedule_get_schedules_true_initial(test_matrix_broker):
     """
     Test that get_schedules() returns an empty list if the schedule's 'initial' property
@@ -71,7 +69,7 @@ async def test_matrix_room_schedule_get_schedules_true_initial(test_matrix_broke
     test_schedule.get_schedules_from_room.assert_not_called()
 
 
-@pytest.mark.integtest  # depends on get_schedules_from_room() and get_all_tasks()
+@pytest.mark.integtest  
 async def test_matrix_room_schedule_get_schedules_no_tasks(test_matrix_broker):
     """
     Test that an epty list is returned if there are no tasks in the schedule
@@ -89,6 +87,7 @@ async def test_matrix_room_schedule_get_schedules_no_tasks(test_matrix_broker):
     assert schedules == []
 
 
+@pytest.mark.integtest  
 async def test_matrix_room_schedule_get_schedules_broker_task(test_matrix_broker):
     """ 
     Tests that a task is returned if a task is registered with the broker
@@ -108,7 +107,7 @@ async def test_matrix_room_schedule_get_schedules_broker_task(test_matrix_broker
         lambda x: print("A", x),
         task_name="taskiq.update_checkpoint",
     )
-    await task.kiq(x=1)
+
     test_broker._init_queues()
     await test_broker.add_mutex_checkpoint_task()
 
@@ -116,9 +115,6 @@ async def test_matrix_room_schedule_get_schedules_broker_task(test_matrix_broker
     result = await test_schedule.get_schedules()
     assert len(result) == 1
 
-
-
-@pytest.mark.integtest  # depends on Exception class
 async def test_matrix_room_schedule_get_schedules_non_existant_task(test_matrix_broker):
     """
     Tests that the function raises an exception if the task name is not in broker_tasks
@@ -144,7 +140,6 @@ async def test_matrix_room_schedule_get_schedules_non_existant_task(test_matrix_
 
             # verify that the mocked function was called once
             mock_get_schedules_from_room.assert_called_once()
-
 
 async def test_matrix_room_schedule_get_schedules_broker_check(test_matrix_broker):
     """
@@ -185,8 +180,6 @@ async def test_matrix_room_schedule_get_schedules_broker_check(test_matrix_broke
         # verify that get_schedules returned an empty list
         assert result == []
 
-
-@pytest.mark.integtest  # depends on Exception and get_schedules_from_room
 async def test_matrix_room_schedule_get_schedules_no_cron_or_time(test_matrix_broker):
     """
     Tests that an error is raised if the task does not have "cron" or "time" key-value
@@ -229,8 +222,6 @@ async def test_matrix_room_schedule_get_schedules_no_cron_or_time(test_matrix_br
         # verify that logger.debug() was not called
         mock_logger.debug.assert_not_called()
 
-
-@pytest.mark.integtest  # depends on Exception and get_schedules_from_room
 async def test_matrix_room_schedule_get_schedules_valid_task(test_matrix_broker):
     """
     Tests that a list containing a ScheduledTask object is returned if the task
@@ -282,8 +273,6 @@ async def test_matrix_room_schedule_get_schedules_valid_task(test_matrix_broker)
             assert result[0].cron == valid_task["cron"]
             assert result[0].time == valid_task["time"]
 
-
-@pytest.mark.integtest  # uses a broker and its clients
 async def test_matrix_room_schedule_get_schedules_from_room_unknown_error(test_matrix_broker):
     """
     Tests that an empty dictionary is returned when there is an unknown error in the
@@ -312,8 +301,6 @@ async def test_matrix_room_schedule_get_schedules_from_room_unknown_error(test_m
     # verify that logger.warn() was called
     mock_log.warn.assert_called()
 
-
-@pytest.mark.integtest  # uses a broker and its clients
 async def test_matrix_room_schedule_get_schedules_from_room_not_found(test_matrix_broker):
     """
     Tests that an empty dictionary is returned when the room is not found.
@@ -342,8 +329,6 @@ async def test_matrix_room_schedule_get_schedules_from_room_not_found(test_matri
     # verify that logger.info() was called
     mock_log.info.assert_called()
 
-
-@pytest.mark.integtest  # uses a broker and its clients
 async def test_matrix_room_schedule_get_schedules_from_room_content_returned(test_matrix_broker):
     """
     Tests that if room_get_state_event returns a RoomGetStateEventResponse, the function
