@@ -170,10 +170,11 @@ async def run_room_message_filter(
         raise Exception(res.message)
 
     d = {}
-    if content_only:
-        d[room_id] = [_get_content_only(event) for event in res.chunk]
-    else:
-        d[room_id] = [event.source for event in res.chunk]
+    if res.chunk:
+        if content_only:
+            d[room_id] = [_get_content_only(event) for event in res.chunk]
+        else:
+            d[room_id] = [event.source for event in res.chunk]
 
     return d, res.start if MessageDirection.back else res.end
 

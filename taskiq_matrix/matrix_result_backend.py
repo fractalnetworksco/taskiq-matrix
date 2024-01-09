@@ -136,14 +136,6 @@ class MatrixResultBackend(AsyncResultBackend):
             since=self.matrix_client.next_batch,
             direction=MessageDirection.back,
         )
-        # if haven't found a result, try again with returned next batch token
-        # until a result is found or there are no more messages (up to date)
-        while not result and next_batch:
-            message_filter["request_id"] = str(uuid4())
-            result, next_batch = await run_room_message_filter(
-                self.matrix_client, self.room, message_filter, since=next_batch
-            )
-
         return result
 
     async def is_result_ready(self, task_id: str) -> bool:

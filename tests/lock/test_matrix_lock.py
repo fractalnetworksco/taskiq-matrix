@@ -1,6 +1,12 @@
 import json
 from base64 import b64encode
-from unittest.mock import AsyncMock, MagicMock, create_autospec, patch, NonCallableMagicMock
+from unittest.mock import (
+    AsyncMock,
+    MagicMock,
+    NonCallableMagicMock,
+    create_autospec,
+    patch,
+)
 
 import pytest
 from fractal.matrix.async_client import FractalAsyncClient
@@ -12,6 +18,7 @@ from taskiq_matrix.lock import (
     RoomSendResponse,
     SyncError,
 )
+
 
 async def test_matrix_lock_constructor_missing_homeserver(new_matrix_room):
     """
@@ -118,7 +125,9 @@ async def test_matrix_lock_create_filter_no_room_id(new_matrix_room):
     lock = MatrixLock(room_id=room_id)
 
     # patch the create_filter function with a mock
-    with patch("taskiq_matrix.lock.create_filter", new_callable=MagicMock) as mock_create_filter:
+    with patch(
+        "taskiq_matrix.lock.create_room_message_filter", new_callable=MagicMock
+    ) as mock_create_filter:
         # call create_filter without passing a room_id
         lock.create_filter(room_id=None)
 
@@ -137,7 +146,9 @@ async def test_matrix_lock_create_filter_given_room_id(new_matrix_room):
     lock = MatrixLock(room_id=room_id)
 
     # patch the create_filter function with a mock
-    with patch("taskiq_matrix.lock.create_filter", new_callable=MagicMock) as mock_create_filter:
+    with patch(
+        "taskiq_matrix.lock.create_room_message_filter", new_callable=MagicMock
+    ) as mock_create_filter:
         # call create_filter and pass a room id
         lock.create_filter(room_id="test room id")
 
@@ -364,6 +375,7 @@ async def test_matrix_lock_lock_functional_test(new_matrix_room):
         # verify that the lock id yielded by lock() matches the lock_id
         assert lock_id == "test_lock_id"
 
+
 async def test_matrix_lock_acquire_lock_not_acquired(new_matrix_room):
     """
     Tests that a lock is not acquired if a filter is returned with a different room_id
@@ -405,6 +417,7 @@ async def test_matrix_lock_acquire_lock_not_acquired(new_matrix_room):
         mock_logger.info.assert_called_once()
     MatrixLock.next_batch = None
 
+
 async def test_matrix_lock_acquire_lock_existing_next_batch(new_matrix_room):
     """
     Tests that get_latest_sync_token is not called if the lock already had a next batch
@@ -414,7 +427,7 @@ async def test_matrix_lock_acquire_lock_existing_next_batch(new_matrix_room):
     room_id = await new_matrix_room()
     lock = MatrixLock(room_id=room_id)
 
-    # set the lock's next_batch 
+    # set the lock's next_batch
     lock.next_batch = await lock.get_latest_sync_token()
 
     # patch get_latest_sync_token to verify function calls
@@ -542,8 +555,8 @@ async def test_matrix_lock_filter_syncerror(new_matrix_room):
 
     # mock the lock's client's sync function and have it return a SyncError
     mock_sync = AsyncMock()
-    mock_sync.return_value = SyncError(message="test error message")
-    lock.client.sync = mock_sync
+    mock_sync.return_value = RoomMessagesError(message="test error message")
+    lock.client.room_messages = mock_sync
 
     # call filter to raise an exception
     with pytest.raises(Exception) as e:
