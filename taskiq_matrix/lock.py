@@ -203,10 +203,7 @@ class MatrixLock:
         result, next_batch = await run_room_message_filter(
             self.client, self.room_id, filter, since=self.next_batch, content_only=True
         )
-        if not next_batch:
-            self.client.next_batch = await self.get_latest_sync_token()
-        else:
-            self.client.next_batch = next_batch
+        self.client.next_batch = next_batch  # type: ignore
         rooms = list(result.keys())
         d = {}
         for room in rooms:
