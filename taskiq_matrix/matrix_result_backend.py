@@ -3,13 +3,12 @@ import os
 import pickle
 import socket
 from base64 import b64decode, b64encode
-from collections import OrderedDict
 from typing import Any, Dict, Optional, TypeVar, Union
 from uuid import uuid4
 
 from async_lru import alru_cache
 from fractal.matrix.async_client import FractalAsyncClient
-from nio import MessageDirection
+from nio import MessageDirection, RoomMessagesError
 from taskiq import AsyncResultBackend
 from taskiq.result import TaskiqResult
 
@@ -121,12 +120,9 @@ class MatrixResultBackend(AsyncResultBackend):
         :return: list of task results.
         """
         if not self.next_batch:
-            # use a next_batch that starts from the beginning of the room
-            # FIXME: starting from the beginning of the room is not ideal
-            # if the room is large, this will take a long time. Should probably
-            # instead start from the most recent message backwards
-            self.next_batch = "s0_0_0_0_0_0_0_0_0_0"
-            self.matrix_client.next_batch = "s0_0_0_0_0_0_0_0_0_0"
+            latest_next_batch = await self.matrix_client.get_latest_sync_token(self.room)
+            self.next_batch = latest_next_batch
+            self.matrix_client.next_batch = latest_next_batch
 
         message_filter = create_room_message_filter(self.room, types=[f"taskiq.result.{task_id}"])
         # cache the next batch token from kick so we can use it later when getting the result
@@ -134,7 +130,11 @@ class MatrixResultBackend(AsyncResultBackend):
         # be updated to the latest sync token, which will be after the result we're looking for
 
         result, next_batch = await run_room_message_filter(
-            self.matrix_client, self.room, message_filter, since=self.matrix_client.next_batch
+            self.matrix_client,
+            self.room,
+            message_filter,
+            since=self.matrix_client.next_batch,
+            direction=MessageDirection.back,
         )
         # if haven't found a result, try again with returned next batch token
         # until a result is found or there are no more messages (up to date)

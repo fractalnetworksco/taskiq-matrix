@@ -152,6 +152,7 @@ async def run_room_message_filter(
     filter: dict,
     since: Optional[str] = None,
     content_only: bool = True,
+    direction: MessageDirection = MessageDirection.front,
 ) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     Execute a room message request with the provided client attempts to deserialize json
@@ -160,8 +161,9 @@ async def run_room_message_filter(
     res = await client.room_messages(
         room_id,
         start=since,
+        end="" if direction == MessageDirection.back else None,
         limit=100,
-        direction=MessageDirection.front,
+        direction=direction,
         message_filter=filter,
     )
     if isinstance(res, RoomMessagesError):
@@ -173,7 +175,7 @@ async def run_room_message_filter(
     else:
         d[room_id] = [event.source for event in res.chunk]
 
-    return d, res.end
+    return d, res.start if MessageDirection.back else res.end
 
 
 async def get_first_unacked_task(tasks: list[Dict[str, Any]]) -> Dict[str, Any]:

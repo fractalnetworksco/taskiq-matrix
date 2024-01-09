@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from fractal.matrix.exceptions import GetLatestSyncTokenError
 from nio import RoomMessagesError
 from taskiq.result import TaskiqResult
 from taskiq_matrix.exceptions import DuplicateExpireTimeSelectedError
@@ -241,7 +242,7 @@ async def test_matrix_result_backend_is_result_ready_room_message_error(
     test_backend.matrix_client.next_batch = None
 
     # patch room_messages to return a RoomMessagesError
-    with pytest.raises(Exception, match="test error"):
+    with pytest.raises(GetLatestSyncTokenError, match="test error"):
         with patch(
             "taskiq_matrix.matrix_result_backend.FractalAsyncClient.room_messages",
             return_value=AsyncMock(
@@ -250,9 +251,9 @@ async def test_matrix_result_backend_is_result_ready_room_message_error(
         ):
             await test_backend.is_result_ready(test_task_id)
 
-    # verify that the next_batch attributes were changed
-    assert test_backend.next_batch == "s0_0_0_0_0_0_0_0_0_0"
-    assert test_backend.matrix_client.next_batch == "s0_0_0_0_0_0_0_0_0_0"
+    # verify that the next_batch attributes were not changed
+    assert test_backend.next_batch is None
+    assert test_backend.matrix_client.next_batch is None
     await test_backend.shutdown()
 
 
@@ -617,6 +618,9 @@ async def test_matrix_result_backend_fetch_result_from_matrix_iterates(
     serialized_result = b64encode(pickle.dumps(result)).decode()
     response = {test_backend.room: [{"body": {"task": {"value": serialized_result}}}]}
 
+    expected_sync_token = "s1028349-2314"
+    test_backend.matrix_client.get_latest_sync_token = AsyncMock(return_value=expected_sync_token)
+
     with patch(
         "taskiq_matrix.matrix_result_backend.run_room_message_filter",
         new=AsyncMock(
@@ -629,8 +633,8 @@ async def test_matrix_result_backend_fetch_result_from_matrix_iterates(
 
         assert mock_run_room_message_filter.call_count == 3
 
-    assert test_backend.next_batch == "s0_0_0_0_0_0_0_0_0_0"
-    assert test_backend.matrix_client.next_batch == "s0_0_0_0_0_0_0_0_0_0"
+    assert test_backend.next_batch == expected_sync_token
+    assert test_backend.matrix_client.next_batch == expected_sync_token
 
     await test_backend.shutdown()
 
