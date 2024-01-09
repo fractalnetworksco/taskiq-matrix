@@ -132,13 +132,14 @@ class MatrixResultBackend(AsyncResultBackend):
         # need to do this because when we sync below here, the client's next_batch token will
         # be updated to the latest sync token, which will be after the result we're looking for
 
-        # FIXME: need to loop through this until the function below does not return
-        # a sync token. This will ensure that the result is not at all in the timeline.
-        # right now we only check the first 100 messages in the timeline, which is not
-        # enough to ensure that the result is not there.
-        result, _ = await run_room_message_filter(
+        result, next_batch = await run_room_message_filter(
             self.matrix_client, self.room, message_filter, since=self.matrix_client.next_batch
         )
+        while not result and next_batch:
+            result, next_batch = await run_room_message_filter(
+                self.matrix_client, self.room, message_filter, since=next_batch
+            )
+
         return result
 
     async def is_result_ready(self, task_id: str) -> bool:
