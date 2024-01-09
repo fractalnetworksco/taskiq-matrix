@@ -204,7 +204,7 @@ class MatrixLock:
             self.client, self.room_id, filter, since=self.next_batch, content_only=True
         )
         if not next_batch:
-            self.next_batch = await self.get_latest_sync_token()
+            self.client.next_batch = await self.get_latest_sync_token()
         else:
             self.client.next_batch = next_batch
         rooms = list(result.keys())
