@@ -1,4 +1,3 @@
-from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple, Union
 from uuid import uuid4
 
@@ -130,7 +129,7 @@ async def run_sync_filter(
     attempts to deserialize json
     """
     if since is None:
-        client.next_batch = None # type:ignore
+        client.next_batch = None  # type:ignore
 
     res = await client.sync(timeout=timeout, sync_filter=filter, since=since)
     if isinstance(res, SyncError):

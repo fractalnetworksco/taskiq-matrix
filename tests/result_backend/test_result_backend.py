@@ -5,12 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from nio import RoomMessagesError
 from taskiq.result import TaskiqResult
 from taskiq_matrix.exceptions import DuplicateExpireTimeSelectedError
 from taskiq_matrix.matrix_result_backend import (
     ExpireTimeMustBeMoreThanZeroError,
     MatrixResultBackend,
-    RoomMessagesError,
 )
 
 
@@ -230,7 +230,6 @@ async def test_matrix_result_backend_is_result_ready_room_message_error(
     NOTE The client's next_batch attribute will be altered outside of this function in
     run_sync_filter, as shown in a later test
     """
-
     # create a MatrixResultBackend object
     test_backend = await test_matrix_result_backend()
 
@@ -249,12 +248,7 @@ async def test_matrix_result_backend_is_result_ready_room_message_error(
                 spec=RoomMessagesError, start="test start", message="test error"
             ),
         ):
-            # patch run_sync_filter to properly test that next_batch is not updated in _is_result_ready
-            with patch(
-                "taskiq_matrix.matrix_result_backend.run_sync_filter",
-                new=AsyncMock(return_value={}),
-            ) as mock_run_sync_filter:
-                await test_backend.is_result_ready(test_task_id)
+            await test_backend.is_result_ready(test_task_id)
 
     # verify that the next_batch attributes were changed
     assert test_backend.next_batch == "s0_0_0_0_0_0_0_0_0_0"
@@ -262,38 +256,51 @@ async def test_matrix_result_backend_is_result_ready_room_message_error(
     await test_backend.shutdown()
 
 
-# async def test_matrix_result_backend_is_result_ready_room_message_error_next_batch_updates(
-#     test_matrix_result_backend,
-# ):
-#     """
-#     Tests that the MatrixBackendResult's client's next_batch attribute is changed outside of
-#     the function when is_result_ready is called
+async def test_matrix_result_backend_is_result_ready_uses_cached_result(
+    test_matrix_result_backend,
+):
+    """
+    Ensures that the is_result_ready function caches results and does not make
+    repeated requests for the same task id.
+    """
+    # create a MatrixResultBackend object
+    test_backend = await test_matrix_result_backend()
 
-#     NOTE The client is the only object that get's its next batch updated in this case.
-#     """
+    # create a task id
+    test_task_id = str(uuid4())
 
-#     # create a MatrixResultBackend object
-#     test_backend = await test_matrix_result_backend()
+    # set the next_batch attributes to None
+    test_backend.next_batch = None
+    test_backend.matrix_client.next_batch = None
 
-#     # create a task id
-#     test_task_id = str(uuid4())
+    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    serialized_result = b64encode(pickle.dumps(result)).decode()
+    response = {test_backend.room: [{"body": {"task": {"value": serialized_result}}}]}
 
-#     # set the next_batch attributes to None
-#     test_backend.next_batch = None
-#     test_backend.matrix_client.next_batch = None
+    with patch(
+        "taskiq_matrix.matrix_result_backend.run_room_message_filter",
+        new=AsyncMock(return_value=(response, None)),
+    ) as mock_run_room_message_filter:
+        # first call should invoke a call to run_room_message_filter
+        await test_backend.is_result_ready(test_task_id)
 
-#     # patch room_messages to return a RoomMessagesError
-#     with patch(
-#         "taskiq_matrix.matrix_result_backend.FractalAsyncClient.room_messages",
-#         return_value=AsyncMock(spec=RoomMessagesError, start="test start"),
-#     ):
-#         await test_backend.is_result_ready(test_task_id)
+        # these two subsequent calls should use the cached result
+        await test_backend.is_result_ready(test_task_id)
+        await test_backend.is_result_ready(test_task_id)
 
-#     # verify that the backend result's next_batch remained unchanged while the client's
-#     # next_batch was updated
-#     assert test_backend.next_batch == None
-#     assert test_backend.matrix_client.next_batch != None
-#     await test_backend.shutdown()
+        # fetch a result for another task id in order to trigger another request
+        await test_backend.is_result_ready(f"{test_task_id}2")
+
+        # should use cached result from first call
+        await test_backend.is_result_ready(f"{test_task_id}2")
+
+        # fetching the first task id again shouldn't trigger another request
+        await test_backend.is_result_ready(test_task_id)
+
+        # verify that run_room_message_filter was only called twice
+        assert mock_run_room_message_filter.call_count == 2
+
+    await test_backend.shutdown()
 
 
 async def test_matrix_result_backend_is_result_ready_result_is_ready(test_matrix_result_backend):
@@ -524,7 +531,6 @@ async def test_matrix_result_backend_get_result_uses_cached_result(
     await test_backend.set_result(test_task_id, result)
 
     serialized_result = b64encode(pickle.dumps(result)).decode()
-
     response = {test_backend.room: [{"body": {"task": {"value": serialized_result}}}]}
 
     with patch(

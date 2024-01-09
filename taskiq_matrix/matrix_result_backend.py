@@ -3,11 +3,12 @@ import os
 import pickle
 import socket
 from base64 import b64decode, b64encode
-from functools import lru_cache
+from collections import OrderedDict
 from typing import Any, Dict, Optional, TypeVar, Union
 
+from async_lru import alru_cache
 from fractal.matrix.async_client import FractalAsyncClient
-from nio import MessageDirection, RoomMessagesError
+from nio import MessageDirection
 from taskiq import AsyncResultBackend
 from taskiq.result import TaskiqResult
 
@@ -16,12 +17,7 @@ from .exceptions import (
     ExpireTimeMustBeMoreThanZeroError,
     ResultDecodeError,
 )
-from .filters import (
-    create_filter,
-    create_room_message_filter,
-    run_room_message_filter,
-    run_sync_filter,
-)
+from .filters import create_room_message_filter, run_room_message_filter
 from .utils import send_message
 
 _ReturnType = TypeVar("_ReturnType")
@@ -113,23 +109,21 @@ class MatrixResultBackend(AsyncResultBackend):
             msgtype=f"taskiq.result.{task_id}",
         )
 
-    @lru_cache(maxsize=512)
+    @alru_cache(maxsize=64, ttl=60)
     async def _fetch_result_from_matrix(self, task_id: str) -> dict[str, Any]:
         """
-        Fetches task result from matrix.
+        Fetches task result from matrix. Caches the result for 60 seconds.
+
+        TODO: Handle waiting for a number of results for a task
 
         :param task_id: ID of the task.
         :return: list of task results.
         """
         if not self.next_batch:
+            # use a next_batch that starts from the beginning of the room
             # FIXME: starting from the beginning of the room is not ideal
             # if the room is large, this will take a long time. Should probably
             # instead start from the most recent message backwards
-            res = await self.matrix_client.room_messages(
-                self.room, start="", limit=1, direction=MessageDirection.front
-            )
-            # if not isinstance(res, RoomMessagesError):
-            # use a next_batch that starts from the beginning of the room
             self.next_batch = "s0_0_0_0_0_0_0_0_0_0"
             self.matrix_client.next_batch = "s0_0_0_0_0_0_0_0_0_0"
 
@@ -174,7 +168,6 @@ class MatrixResultBackend(AsyncResultBackend):
         :return: task's return value.
         """
         result_object = await self._fetch_result_from_matrix(task_id)
-        # TODO: handle waiting for a number of results for a task
 
         try:
             result = result_object[self.room][0]
