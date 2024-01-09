@@ -5,6 +5,7 @@ import socket
 from base64 import b64decode, b64encode
 from collections import OrderedDict
 from typing import Any, Dict, Optional, TypeVar, Union
+from uuid import uuid4
 
 from async_lru import alru_cache
 from fractal.matrix.async_client import FractalAsyncClient
@@ -138,6 +139,7 @@ class MatrixResultBackend(AsyncResultBackend):
         # if haven't found a result, try again with returned next batch token
         # until a result is found or there are no more messages (up to date)
         while not result and next_batch:
+            message_filter["request_id"] = str(uuid4())
             result, next_batch = await run_room_message_filter(
                 self.matrix_client, self.room, message_filter, since=next_batch
             )
