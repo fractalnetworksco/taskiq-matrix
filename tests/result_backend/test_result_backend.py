@@ -593,3 +593,75 @@ async def test_matrix_result_backend_get_result_no_result_set(test_matrix_result
     # verify that the logger argument was the correct one
     assert "Error getting task result from Matrix" in logged_string
     await result_backend.shutdown()
+
+
+async def test_matrix_result_backend_fetch_result_from_matrix_iterates(
+    test_matrix_result_backend,
+):
+    """
+    Verifies that if the result is not received in the first call
+    to run_room_message_filter, the function will continue to call
+    run_room_message_filter until the result is received.
+    """
+    # create a MatrixResultBackend object
+    test_backend = await test_matrix_result_backend()
+
+    # create a task id
+    test_task_id = str(uuid4())
+
+    # set the next_batch attributes to None
+    test_backend.next_batch = None
+    test_backend.matrix_client.next_batch = None
+
+    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    serialized_result = b64encode(pickle.dumps(result)).decode()
+    response = {test_backend.room: [{"body": {"task": {"value": serialized_result}}}]}
+
+    with patch(
+        "taskiq_matrix.matrix_result_backend.run_room_message_filter",
+        new=AsyncMock(
+            side_effect=[({}, "new_next_batch"), ({}, "new_next_batch"), (response, None)]
+        ),
+    ) as mock_run_room_message_filter:
+        # first call should invoke a call to run_room_message_filter
+        result = await test_backend._fetch_result_from_matrix(test_task_id)
+        assert result == response
+
+        assert mock_run_room_message_filter.call_count == 3
+
+    assert test_backend.next_batch == "s0_0_0_0_0_0_0_0_0_0"
+    assert test_backend.matrix_client.next_batch == "s0_0_0_0_0_0_0_0_0_0"
+
+    await test_backend.shutdown()
+
+
+async def test_matrix_result_backend_fetch_result_from_matrix_iterates_no_result(
+    test_matrix_result_backend,
+):
+    """
+    Verifies that if the next batch is None (meaning there are no new messages)
+    and the result is not found, the function will return an empty dictionary
+    """
+    # create a MatrixResultBackend object
+    test_backend = await test_matrix_result_backend()
+
+    # create a task id
+    test_task_id = str(uuid4())
+
+    # set the next_batch attributes to None
+    test_backend.next_batch = None
+    test_backend.matrix_client.next_batch = None
+
+    # verify that if the next batch is None (meaning there are no new messages)
+    # and the result is not found, the function will return an empty dictionary
+    with patch(
+        "taskiq_matrix.matrix_result_backend.run_room_message_filter",
+        new=AsyncMock(side_effect=[({}, "new_next_batch"), ({}, None)]),
+        create=True,
+    ) as mock_run_room_message_filter:
+        # first call should invoke a call to run_room_message_filter
+        no_result = await test_backend._fetch_result_from_matrix(test_task_id)
+        assert no_result == {}
+        assert mock_run_room_message_filter.call_count == 2
+
+    await test_backend.shutdown()
