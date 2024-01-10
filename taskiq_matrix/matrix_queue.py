@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
     MessageDirection,
-    RoomContextError,
     RoomGetStateEventError,
     RoomMessagesResponse,
     RoomPutStateError,
@@ -366,11 +365,10 @@ class MatrixQueue:
         queue_ack_type = self.task_types.ack
         expected_ack = f"{queue_ack_type}.{task_id}"
 
-        # attempt to fetch the given task_id's ack from the room
-        # FIXME: Hard to know how far back to look back. What if the ack
-        # is 1001 events back? We would miss it.
-        task_filter = create_sync_filter(self.room_id, types=[expected_ack], limit=1000)
-        tasks = await run_sync_filter(self.client, task_filter, timeout=0, since=next_batch)
+        task_filter = create_room_message_filter(self.room_id, types=[expected_ack])
+        tasks, _ = await run_room_message_filter(
+            self.client, self.room_id, task_filter, since=next_batch
+        )
 
         # if anything for the room was returned, then the task was acked
         return tasks.get(self.room_id) is not None
