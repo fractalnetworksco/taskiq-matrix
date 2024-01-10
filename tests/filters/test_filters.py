@@ -5,9 +5,16 @@ from uuid import uuid4
 import pytest
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import AsyncClient, SyncError, SyncResponse
+from taskiq_matrix.filters import (
+    RoomMessagesError,
+    create_filter,
+    create_room_message_filter,
+    create_sync_filter,
+    get_first_unacked_task,
+    run_room_message_filter,
+    run_sync_filter,
+)
 from taskiq_matrix.matrix_queue import TaskTypes
-
-from taskiq_matrix.filters import create_filter, get_first_unacked_task, run_sync_filter
 
 
 async def test_filters_run_sync_filter_sync_error():
@@ -108,13 +115,8 @@ async def test_filters_run_sync_filter_true_content_only(unknown_event_factory):
     event3 = unknown_event_factory("event3", "sender3")
 
     # create a dictionary of event objects and assign them a room
-    mock_client.sync.return_value.rooms.join["room1"].timeline.events = [
-        event1,
-        event2
-    ]
-    mock_client.sync.return_value.rooms.join["room2"].timeline.events = [
-        event3
-    ]
+    mock_client.sync.return_value.rooms.join["room1"].timeline.events = [event1, event2]
+    mock_client.sync.return_value.rooms.join["room2"].timeline.events = [event3]
 
     # Call the run_sync_filter function
     result = await run_sync_filter(
@@ -143,7 +145,7 @@ async def test_filters_get_first_unacked_task_mixed_tasks():
     """
 
     # create a TaskType object
-    t_types = TaskTypes('test')
+    t_types = TaskTypes("test")
 
     # create a list of unacknowledged task dictionaries
     unacknowledged_tasks = [
@@ -161,7 +163,6 @@ async def test_filters_get_first_unacked_task_mixed_tasks():
     # combine the two lists into a list of tasks
     tasks = unacknowledged_tasks + acknowledged_tasks
 
-
     # call the get_first_unacked_task function
     result = await get_first_unacked_task(tasks, t_types)
 
@@ -178,7 +179,7 @@ async def test_filters_get_first_unacked_task_only_acked_tasks():
     """
 
     # create a TaskType object
-    t_types = TaskTypes('test')
+    t_types = TaskTypes("test")
 
     # create a dictionary of acknowledged tasks
     acknowledged_tasks = [
@@ -212,6 +213,7 @@ async def test_filters_create_filter_with_limit():
     assert filter["room"]["rooms"][0] == test_room_id
     assert filter["room"]["timeline"]["limit"] == test_limit
 
+
 async def test_filters_create_filter_no_limit():
     """
     Tests that a dictionary with the correct room_id and missing the limit key is
@@ -229,6 +231,7 @@ async def test_filters_create_filter_no_limit():
     assert "limit" not in filter["room"]["timeline"]
     assert filter["room"]["rooms"][0] == test_room_id
 
+
 async def test_filters_create_filter_true_room_event_filter():
     """
     Tests that only the filter room timeline dictionary is returned along with the request
@@ -238,7 +241,7 @@ async def test_filters_create_filter_true_room_event_filter():
     # create random room id variable
     test_room_id = str(uuid4())
 
-    # call create_filter and store the dictionary passing None for the limit
+    # call create_filter and store the dictionary passing True for the room_event_filter param
     filter = create_filter(room_id=test_room_id, room_event_filter=True)
 
     # verify what is found in the filter
@@ -253,3 +256,126 @@ async def test_filters_create_filter_true_room_event_filter():
     assert "room" not in filter
 
 
+async def test_filters_create_room_message_filter_returns_expected_filter():
+    """
+    Tests that the expected format is returned from create_filter when
+    create_room_message_filter is called.
+    """
+
+    # create random room id variable
+    test_room_id = str(uuid4())
+
+    # call create_filter and store the dictionary
+    filter = create_room_message_filter(
+        test_room_id,
+        types=["test_types"],
+        not_types=["not_types_test"],
+        not_senders=["not_senders_test"],
+    )
+
+    # verify that the the expected structure is returned
+    assert "types" in filter
+    assert "not_types" in filter
+    assert "not_senders" in filter
+    assert "request_id" in filter
+
+    # verify that the values passed to create_room_message_filter
+    # are sent to create_filter and are returned in the dictionary
+    assert filter["types"][0] == "test_types"
+    assert filter["not_types"][0] == "not_types_test"
+    assert filter["not_senders"][0] == "not_senders_test"
+
+
+async def test_filters_create_sync_filter_returns_expected_filter():
+    """
+    Tests that the expected format is returned from create_filter when
+    create_room_message_filter is called.
+    """
+
+    # create random room id variable
+    test_room_id = str(uuid4())
+
+    # call create_filter and store the dictionary
+    filter = create_sync_filter(
+        test_room_id,
+        types=["test_types"],
+        not_types=["not_types_test"],
+        not_senders=["not_senders_test"],
+    )
+
+    # verify that the the expected structure is returned
+    assert "presence" in filter
+    assert "account_data" in filter
+    assert "room" in filter
+    assert "request_id" in filter
+
+    # verify that the values passed to create_room_message_filter
+    #     are sent to create_filter and are returned in the dictionary
+    assert filter["room"]["timeline"]["types"][0] == "test_types"
+    assert filter["room"]["timeline"]["not_types"][0] == "not_types_test"
+    assert filter["room"]["timeline"]["not_senders"][0] == "not_senders_test"
+
+
+async def test_filters_run_room_message_filter_room_message_error():
+    """ 
+    Tests that an exception is raised if room_messages returns a RoomMessagesError
+    """
+
+    # create a FractalAsyncClient object
+    client = FractalAsyncClient()
+
+    # mock the room_messages function to return a RoomMessagesError
+    client.room_messages = AsyncMock()
+    client.room_messages.return_value = RoomMessagesError(message="test error message")
+
+    # call run_room_message_filter to raise an exception
+    with pytest.raises(Exception) as e:
+        await run_room_message_filter(
+            client,
+            "test_room_id",
+            {},
+        )
+
+    # verify that the exception message raised matches what was created locally
+    assert str(e.value) == client.room_messages.return_value.message
+
+async def test_filters_run_room_message_filter_content_only(unknown_event_factory, test_matrix_broker):
+    """
+    """
+
+    broker = await test_matrix_broker() 
+    client = broker.mutex_queue.client
+    mock_sync = AsyncMock()
+    client.sync = mock_sync
+
+    # set content_only to True
+    true_content_only = True
+
+    # create a dictionary of rooms
+    client.sync.return_value.rooms.join = {
+        "room1": MagicMock(),
+        "room2": MagicMock(),
+    }
+
+    event1 = unknown_event_factory("event1", "sender1")
+    event2 = unknown_event_factory("event2", "sender2")
+    event3 = unknown_event_factory("event3", "sender3")
+
+    # create a dictionary of event objects and assign them a room
+    client.sync.return_value.rooms.join["room1"].timeline.events = [event1, event2]
+    client.sync.return_value.rooms.join["room2"].timeline.events = [event3]
+
+    room_id: str = client.room_id # type:ignore
+
+    print('event example========', event1)
+
+    # Call the run_sync_filter function
+    result, result2 = await run_room_message_filter(
+        client,
+        room_id,
+        {},
+        content_only=True
+    )
+
+    print('result============',result)
+    print('second result============',result2)

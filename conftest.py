@@ -7,7 +7,7 @@ from uuid import uuid4
 from fractal.matrix import FractalAsyncClient
 
 import pytest
-from fractal.matrix import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
 from taskiq_matrix.matrix_broker import MatrixBroker
