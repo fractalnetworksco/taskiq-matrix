@@ -616,7 +616,9 @@ async def test_matrix_lock_get_latest_sync_token_good_response(new_matrix_room):
 
 
 async def test_matrix_lock_acquired(
-    matrix_client: AsyncClient, new_matrix_room: Callable[[], Awaitable[str]], aio_benchmark
+    matrix_client: FractalAsyncClient,
+    new_matrix_room: Callable[[], Awaitable[str]],
+    aio_benchmark,
 ):
     """
     Ensure that a lock can be acquired, and if it is acquired,
@@ -626,9 +628,6 @@ async def test_matrix_lock_acquired(
 
     @aio_benchmark
     async def test():
-        import time
-
-        time.sleep(1)
         # generate a unique key to lock on
         key = str(uuid4())
         async with MatrixLock(room_id=test_room_id).lock(key) as lock_id:
@@ -643,7 +642,7 @@ async def test_matrix_lock_acquired(
 
 
 async def test_matrix_lock_acquired_no_reacquire(
-    matrix_client: AsyncClient, new_matrix_room: Callable[[], Awaitable[str]]
+    matrix_client: FractalAsyncClient, new_matrix_room: Callable[[], Awaitable[str]]
 ):
     """
     Ensure that a lock can be acquired, and if it is acquired,
