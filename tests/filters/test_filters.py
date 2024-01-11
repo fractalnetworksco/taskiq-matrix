@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 from fractal.matrix.async_client import FractalAsyncClient
-from nio import AsyncClient, SyncError, SyncResponse
+from nio import AsyncClient, SyncError, SyncResponse, RoomMessagesResponse
 from taskiq_matrix.filters import (
     RoomMessagesError,
     create_filter,
@@ -317,7 +317,7 @@ async def test_filters_create_sync_filter_returns_expected_filter():
 
 
 async def test_filters_run_room_message_filter_room_message_error():
-    """ 
+    """
     Tests that an exception is raised if room_messages returns a RoomMessagesError
     """
 
@@ -339,17 +339,18 @@ async def test_filters_run_room_message_filter_room_message_error():
     # verify that the exception message raised matches what was created locally
     assert str(e.value) == client.room_messages.return_value.message
 
-async def test_filters_run_room_message_filter_content_only(unknown_event_factory, test_matrix_broker):
-    """
-    """
 
-    broker = await test_matrix_broker() 
+async def test_filters_run_room_message_filter_content_only(
+    unknown_event_factory, 
+    test_matrix_broker, 
+):
+    """ """
+
+    broker = await test_matrix_broker()
     client = broker.mutex_queue.client
+    await client.join_room(broker.room_id)
     mock_sync = AsyncMock()
     client.sync = mock_sync
-
-    # set content_only to True
-    true_content_only = True
 
     # create a dictionary of rooms
     client.sync.return_value.rooms.join = {
@@ -371,11 +372,13 @@ async def test_filters_run_room_message_filter_content_only(unknown_event_factor
 
     # Call the run_sync_filter function
     result, result2 = await run_room_message_filter(
-        client,
-        room_id,
-        {},
-        content_only=True
+        client, room_id, {}, content_only=True
     )
 
-    print('result============',result)
-    print('second result============',result2)
+    print("result============", result)
+    print("second result============", result2)
+    print("size============", len(result))
+
+async def test_filters_run_room_message_filter_():
+    """
+    """
