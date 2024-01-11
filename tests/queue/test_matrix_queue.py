@@ -10,10 +10,13 @@ from taskiq_matrix.matrix_queue import (
     LockAcquireError,
     MatrixQueue,
     Task,
-    WhoamiError,
     TaskAlreadyAcked,
+    WhoamiError,
+    create_room_message_filter,
+    create_sync_filter,
 )
 from taskiq_matrix.utils import send_message
+
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_verify_room_exists_error(test_matrix_broker):
@@ -133,6 +136,135 @@ async def test_matrix_queue_get_tasks_(test_matrix_broker):
     print(result)
     print('lenth of list======', len(result))
     await matrix_queue.shutdown()
+
+async def test_matrix_queue_get_tasks_no_filter_caught_up(test_matrix_broker, test_broker_message):
+    """
+    Tests that create_room_message_filter and run_room_message_filter are not called if
+    the queue is caught up.
+    """
+
+    # create a broker object
+    broker = await test_matrix_broker()
+
+    # create a broker message and kick it
+    message = test_broker_message
+    await broker.kick(message)
+
+    # set the broker's mutex_queue caught_up attribute to True
+    broker.mutex_queue.caught_up = True
+
+    # patch create_room_message_filter to verify it wasn't called
+    with patch('taskiq_matrix.matrix_queue.create_room_message_filter') as mock_create_room_filter:
+        # patch run_room_message_filter to verify it wasn't called
+        with patch('taskiq_matrix.matrix_queue.run_room_message_filter') as mock_run_room_message_filter:
+            tasks = await broker.mutex_queue.get_tasks(timeout=0)
+
+    # verify that the room filter function calls were not made
+    mock_create_room_filter.assert_not_called()
+    mock_run_room_message_filter.assert_not_called()
+
+    # verify that the task that was kicked to the broker is the same as the one
+        # that was returned
+    assert tasks[0].id == message.task_id
+
+async def test_matrix_queue_get_tasks_existing_filter_not_caught_up(test_matrix_broker, test_broker_message):
+    """
+    Tests that filters are not created again if a filter is passed as a parameter to 
+    get_tasks.
+    """
+
+    # create a broker object
+    broker = await test_matrix_broker()
+
+    # create a broker message and kick it
+    message = test_broker_message
+    await broker.kick(message)
+
+    # set the broker's mutex_queue caught_up attribute to False
+    broker.mutex_queue.caught_up = False
+
+    # create a task filter
+    task_filter = create_room_message_filter(
+        broker.room_id,
+        types=[broker.mutex_queue.task_types.task, f"{broker.mutex_queue.task_types.ack}.*"]
+    )
+
+    # patch create_room_message_filter to verify it was not called
+    with patch('taskiq_matrix.matrix_queue.create_room_message_filter') as mock_create_room_message_filter:
+        # patch create_sync_message_filter to verify it was not called
+        with patch('taskiq_matrix.matrix_queue.create_sync_filter') as mock_create_sync_filter:
+            # patch run_sync_filter to verify it was not called
+            with patch('taskiq_matrix.matrix_queue.run_sync_filter') as mock_run_sync_filter:
+                tasks = await broker.mutex_queue.get_tasks(
+                    timeout=0,
+                    task_filter=task_filter
+                )
+
+    # verify that filter functions were not called
+    mock_create_room_message_filter.assert_not_called()
+    mock_run_sync_filter.assert_not_called()
+    mock_create_sync_filter.assert_not_called()
+
+    # verify that the task that was kicked to the broker is the same as the one
+        # that was returned
+    assert tasks[0].id == message.task_id
+
+async def test_matrix_queue_get_tasks_existing_filter_caught_up(test_matrix_broker, test_broker_message):
+    """
+    #? not related to this test but how do you hit "not end:" ?
+    """
+
+    # create a broker object
+    broker = await test_matrix_broker()
+
+    # create a broker message and kick it
+    message = test_broker_message
+    await broker.kick(message)
+
+    # set the broker's mutex_queue caught_up attribute to True
+    broker.mutex_queue.caught_up = True
+
+    # create a filter to pass as a parameter
+    task_filter = create_sync_filter(
+        broker.room_id,
+        types=[broker.mutex_queue.task_types.task, f"{broker.mutex_queue.task_types.ack}.*"]
+    )
+
+    # patch filter funcions to verify that they are not called
+    with patch('taskiq_matrix.matrix_queue.run_room_message_filter') as mock_run_room_message_filter:
+        with patch('taskiq_matrix.matrix_queue.create_sync_filter') as mock_create_sync_filter:
+            with patch('taskiq_matrix.matrix_queue.create_room_message_filter') as mock_create_room_message_filter:
+                tasks = await broker.mutex_queue.get_tasks(
+                    timeout=0,
+                    task_filter=task_filter,
+                )
+    
+    # verify that the filter functions are not called
+    mock_run_room_message_filter.assert_not_called()
+    mock_create_sync_filter.assert_not_called()
+    mock_create_room_message_filter.assert_not_called()
+
+    # verify that the task returned has a task_id matching what was created locally
+    assert tasks[0].id == message.task_id
+    
+async def test_matrix_queue_get_tasks_not_end(test_matrix_broker, test_broker_message):
+    """
+    ! fix this test
+    """
+
+    # create a broker object
+    broker = await test_matrix_broker()
+
+    # create a broker message and kick it
+    message = test_broker_message
+    await broker.kick(message)
+
+    await broker.mutex_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
+
+    print('full sync')
+
+    tasks = await broker.mutex_queue.get_tasks(timeout=0)
+
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_sent_by_self(test_matrix_broker):

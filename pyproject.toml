@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "taskiq-matrix"
-version = "0.0.2"
+version = "0.0.4"
 description = ""
 authors = ["Mo Balaa <balaa@ether.ai>"]
 readme = "README.md"
@@ -10,6 +10,7 @@ python = "^3.10"
 taskiq = "^0.10.4"
 matrix-nio = "^0.22.1"
 fractal-matrix-client = "^0.0.1"
+async-lru = "^2.0.4"
 
 docker = { version = "^6.1.3", optional = true }
 pytest = { version = "^7.4.2", optional = true }
@@ -17,10 +18,10 @@ pytest-asyncio = { version = "^0.21.1", optional = true }
 pytest-cov = { version = "^4.1.0", optional = true }
 pytest-mock = { version = "^3.11.1", optional = true }
 ipython = { version = "^8.17.2", optional = true }
+pytest-benchmark = { version = "^4.0.0", optional = true }
 
 [tool.poetry.extras]
-dev = ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "docker", "ipython"]
-
+dev = ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "docker", "ipython", "pytest-benchmark"]
 
 [build-system]
 requires = ["poetry-core"]

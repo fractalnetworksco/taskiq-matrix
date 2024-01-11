@@ -6,16 +6,14 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
-from nio import AsyncClient, RoomCreateError, RoomGetStateEventResponse, UnknownEvent
+import pytest_asyncio
+from fractal.matrix import FractalAsyncClient
+from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
 
-from taskiq_matrix.matrix_broker import (
-    BroadcastQueue,
-    MatrixBroker,
-    MatrixQueue,
-    ReplicatedQueue,
-)
-from taskiq_matrix.matrix_queue import Checkpoint
+from taskiq_matrix.matrix_broker import MatrixBroker
+from taskiq_matrix.matrix_queue import Checkpoint, Task
+from taskiq_matrix.matrix_result_backend import MatrixResultBackend
 
 try:
     TEST_HOMESERVER_URL = os.environ["MATRIX_HOMESERVER_URL"]
@@ -28,15 +26,14 @@ except KeyError:
 
 
 @pytest.fixture(scope="function")
-def matrix_client() -> Generator[AsyncClient, None, None]:
-    client = AsyncClient(homeserver=TEST_HOMESERVER_URL)
-    client.access_token = TEST_USER_ACCESS_TOKEN
+def matrix_client() -> Generator[FractalAsyncClient, None, None]:
+    client = FractalAsyncClient(access_token=TEST_USER_ACCESS_TOKEN)
     yield client
     asyncio.run(client.close())
 
 
 @pytest.fixture(scope="function")
-def new_matrix_room(matrix_client: AsyncClient):
+def new_matrix_room(matrix_client: FractalAsyncClient):
     """
     Creates a new room and returns its room id.
     """
@@ -53,6 +50,36 @@ def new_matrix_room(matrix_client: AsyncClient):
 
 
 @pytest.fixture(scope="function")
+def test_matrix_result_backend(new_matrix_room) -> Callable[[], Awaitable[MatrixResultBackend]]:
+    """
+    Creates a MatrixResultBackend object
+    """
+
+    async def create() -> MatrixResultBackend:
+        room_id = await new_matrix_room()
+        return MatrixResultBackend(
+            homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
+            access_token=os.environ["MATRIX_ACCESS_TOKEN"],
+            room_id=room_id,
+        )
+
+    return create
+
+
+class MockAsyncIterable:
+    def __init__(self, items):
+        self.items = items
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self.items:
+            raise StopAsyncIteration
+        return self.items.pop(0)
+
+
+@pytest.fixture(scope="function")
 def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
     async def create():
         """
@@ -65,10 +92,9 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
 
         # set the broker's room id
         broker.room_id = room_id
-        url = os.environ["MATRIX_HOMESERVER_URL"]
-        access_token = os.environ["MATRIX_ACCESS_TOKEN"]
-
-        broker.with_matrix_config(room_id, url, access_token)
+        broker.with_matrix_config(
+            room_id, os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
+        )
 
         # use room_id for the queues
         broker._init_queues()
@@ -100,18 +126,12 @@ def test_broker_message():
 
 
 @pytest.fixture(scope="function")
-def test_checkpoint(test_room_id) -> Checkpoint:
-    mock_client_parameter = MagicMock(spec=AsyncClient)
+def test_checkpoint(test_room_id):
+    mock_client_parameter = MagicMock(spec=FractalAsyncClient)
     mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
         content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
     )
     return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
-
-
-# FIXME: Add a Matrix result backend fixture. The fixture should look very similar
-#        to the matrix_client fixture above. The only difference is that the
-#        result backend fixture should return a MatrixResultBackend instance.
-#        Make sure to call the shutdown method on the result backend after yielding!
 
 
 @pytest.fixture
@@ -125,15 +145,92 @@ def unknown_event_factory() -> Callable[[str, str], UnknownEvent]:
     Returns a mock Matrix event class.
     """
 
-    def create_test_event(body: str, sender: str) -> UnknownEvent:
+    def create_test_event(body: str, sender: str, msgtype: str = "test.event") -> UnknownEvent:
         return UnknownEvent(
             source={
                 "event_id": "test_event_id",
                 "sender": sender,
                 "origin_server_ts": 0,
-                "content": {"type": "test.event", "body": body},
+                "content": {"msgtype": msgtype, "body": body, "sender": sender},
             },
-            type="test_event",
+            type=msgtype,
         )
 
     return create_test_event
+
+
+@pytest.fixture
+def test_iterable_tasks(unknown_event_factory):
+    """
+    get_tasks() interable
+    """
+
+    def factory(num_tasks: int):
+        tasks = []
+        for i in range(num_tasks):
+            event = unknown_event_factory(
+                {
+                    "queue": "mutex",
+                    "task_id": str(uuid4()),
+                    "msgtype": "taskiq.mutex.task",
+                    "task": json.dumps(
+                        {
+                            "name": "task_fixture",
+                            "cron": "* * * * *",
+                            "labels": {"task_id": "mutex_checkpoint", "queue": "mutex"},
+                            "args": ["mutex"],
+                            "kwargs": {},
+                        }
+                    ),
+                },
+                "test_sender",
+            )
+
+            tasks.append(Task(**event.source["content"]))
+
+        return MockAsyncIterable([tasks])
+
+    return factory
+
+
+@pytest.yield_fixture(scope="function")
+def aio_benchmark(benchmark):
+    import asyncio
+    import threading
+
+    class Sync2Async:
+        def __init__(self, coro, *args, **kwargs):
+            self.coro = coro
+            self.args = args
+            self.kwargs = kwargs
+            self.custom_loop = None
+            self.thread = None
+
+        def start_background_loop(self) -> None:
+            asyncio.set_event_loop(self.custom_loop)
+            self.custom_loop.run_forever()
+
+        def __call__(self):
+            evloop = None
+            awaitable = self.coro(*self.args, **self.kwargs)
+            try:
+                evloop = asyncio.get_running_loop()
+            except:
+                pass
+            if evloop is None:
+                return asyncio.run(awaitable)
+            else:
+                if not self.custom_loop or not self.thread or not self.thread.is_alive():
+                    self.custom_loop = asyncio.new_event_loop()
+                    self.thread = threading.Thread(target=self.start_background_loop, daemon=True)
+                    self.thread.start()
+
+                return asyncio.run_coroutine_threadsafe(awaitable, self.custom_loop).result()
+
+    def _wrapper(func, *args, **kwargs):
+        if asyncio.iscoroutinefunction(func):
+            benchmark(Sync2Async(func, *args, **kwargs))
+        else:
+            benchmark(func, *args, **kwargs)
+
+    return _wrapper

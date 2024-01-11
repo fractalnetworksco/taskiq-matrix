@@ -16,7 +16,7 @@ from nio import (
 )
 
 from .exceptions import LockAcquireError
-from .filters import create_filter
+from .filters import create_room_message_filter, run_room_message_filter
 from .utils import setup_console_logging
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ class MatrixLock:
         if not room_id:
             room_id = self.room_id
 
-        return create_filter(room_id, types=types, limit=limit)
+        return create_room_message_filter(room_id, types=types, limit=limit)
 
     async def send_message(
         self,
@@ -160,6 +160,9 @@ class MatrixLock:
         lock_types = [f"fn.lock.acquire.{key}", f"fn.lock.release.{key}"]
         if not self.next_batch:
             self.next_batch = await self.get_latest_sync_token()
+            # because we create a new instance of a lock each time, we cache
+            # a next batch that we can use for subsequent invocations of locks.
+            # FIXME: this should be advanced
             MatrixLock.next_batch = self.next_batch
         res = await self.filter(
             self.create_filter(types=lock_types), timeout=0, since=self.next_batch
@@ -187,34 +190,29 @@ class MatrixLock:
             return False
 
     async def filter(
-        self, filter: dict, timeout: int = 3000, since: Optional[str] = None, **kwargs
+        self,
+        filter: dict,
+        timeout: int = 3000,
+        since: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         execute a filter with the client, optionally filter message body by kwargs
         attempts to deserialize json
         """
         logger.debug("Next batch is %s" % self.next_batch)
-        res = await self.client.sync(timeout, sync_filter=filter, since=self.next_batch)
-        if isinstance(res, SyncError):
-            raise Exception(res.message)
-
-        rooms = list(res.rooms.join.keys())
-        filter_keys = kwargs.keys()
+        result, next_batch = await run_room_message_filter(
+            self.client, self.room_id, filter, since=self.next_batch, content_only=True
+        )
+        self.client.next_batch = next_batch  # type: ignore
+        rooms = list(result.keys())
         d = {}
         for room in rooms:
             d[room] = list(
                 map(
                     json.loads,
-                    [
-                        event.source["content"]["body"]
-                        for event in res.rooms.join[room].timeline.events
-                    ],
+                    [event["body"] for event in result[room]],
                 )
             )
-        if kwargs:
-            # filter out all keys by value from kwargs
-            for key in filter_keys:
-                d = {k: [i for i in v if i.get(key) == kwargs[key]] for k, v in d.items()}
         return d
 
     async def get_latest_sync_token(self) -> str:
