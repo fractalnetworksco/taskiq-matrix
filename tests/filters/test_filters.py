@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 from fractal.matrix.async_client import FractalAsyncClient
-from nio import AsyncClient, SyncError, SyncResponse, RoomMessagesResponse
+from nio import AsyncClient, RoomMessagesResponse, SyncError, SyncResponse
 from taskiq_matrix.filters import (
     RoomMessagesError,
     create_filter,
@@ -341,44 +341,40 @@ async def test_filters_run_room_message_filter_room_message_error():
 
 
 async def test_filters_run_room_message_filter_content_only(
-    unknown_event_factory, 
-    test_matrix_broker, 
+    test_multiple_broker_message,
+    test_matrix_broker,
 ):
-    """ """
+    """ 
+    ! got this test semi-working but check what you're testing again
+    """
 
     broker = await test_matrix_broker()
-    client = broker.mutex_queue.client
-    await client.join_room(broker.room_id)
-    mock_sync = AsyncMock()
-    client.sync = mock_sync
+    queue = broker.mutex_queue
+    client = queue.client
+    room_id: str = client.room_id  # type:ignore
 
-    # create a dictionary of rooms
-    client.sync.return_value.rooms.join = {
-        "room1": MagicMock(),
-        "room2": MagicMock(),
-    }
+    num_messages = 3
+    messages = await test_multiple_broker_message(num_messages)
 
-    event1 = unknown_event_factory("event1", "sender1")
-    event2 = unknown_event_factory("event2", "sender2")
-    event3 = unknown_event_factory("event3", "sender3")
+    task_ids = []
+    for message in messages:
+        await broker.kick(message)
+        task_ids.append(message.task_id)
 
-    # create a dictionary of event objects and assign them a room
-    client.sync.return_value.rooms.join["room1"].timeline.events = [event1, event2]
-    client.sync.return_value.rooms.join["room2"].timeline.events = [event3]
-
-    room_id: str = client.room_id # type:ignore
-
-    print('event example========', event1)
-
-    # Call the run_sync_filter function
-    result, result2 = await run_room_message_filter(
-        client, room_id, {}, content_only=True
+    task_filter = create_room_message_filter(
+        broker.room_id,
+        types=[queue.task_types.task, f"{queue.task_types.ack}.*"],
     )
 
-    print("result============", result)
-    print("second result============", result2)
-    print("size============", len(result))
+    # Call the run_sync_filter function
+    result, _ = await run_room_message_filter(
+        client, room_id, task_filter, content_only=True
+    )
+    
+    for i in range(num_messages):
+        assert result[room_id][i]['body']['task_id'] == task_ids[i]
+
+
 
 async def test_filters_run_room_message_filter_():
-    """
-    """
+    """ """
