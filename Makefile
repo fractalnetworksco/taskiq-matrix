@@ -27,7 +27,7 @@ taskiq-matrix.dev.env: .synapse
 	python test-config/prepare-test.py
 
 test: taskiq-matrix.dev.env
-	. taskiq-matrix.dev.env && pytest -k ${TEST} -s --cov-config=.coveragerc --cov=taskiq_matrix -v --asyncio-mode=auto --cov-report=lcov --cov-report=term tests/
+	. taskiq-matrix.dev.env && pytest -k ${TEST} -s --cov-config=.coveragerc --cov=taskiq_matrix -v --asyncio-mode=auto --cov-report=lcov --cov-report=term --benchmark-compare --benchmark-autosave tests/
 
 qtest: taskiq-matrix.dev.env
 	. taskiq-matrix.dev.env && pytest -k ${TEST} -s --cov-config=.coveragerc --cov=taskiq_matrix --asyncio-mode=auto --cov-report=lcov tests/

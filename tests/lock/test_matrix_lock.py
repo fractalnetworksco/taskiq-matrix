@@ -1,10 +1,20 @@
 import json
 from base64 import b64encode
-from unittest.mock import AsyncMock, MagicMock, create_autospec, patch, NonCallableMagicMock
+from typing import Awaitable, Callable
+from unittest.mock import (
+    AsyncMock,
+    MagicMock,
+    NonCallableMagicMock,
+    create_autospec,
+    patch,
+)
+from uuid import uuid4
 
 import pytest
 from fractal.matrix.async_client import FractalAsyncClient
-from nio import MatrixRoom, RoomMessagesResponse, SyncResponse
+from nio import AsyncClient, MatrixRoom, RoomMessagesResponse, SyncResponse
+from taskiq_matrix.exceptions import LockAcquireError
+from taskiq_matrix.filters import create_filter, run_sync_filter
 from taskiq_matrix.lock import (
     LockAcquireError,
     MatrixLock,
@@ -12,6 +22,7 @@ from taskiq_matrix.lock import (
     RoomSendResponse,
     SyncError,
 )
+
 
 async def test_matrix_lock_constructor_missing_homeserver(new_matrix_room):
     """
@@ -118,7 +129,9 @@ async def test_matrix_lock_create_filter_no_room_id(new_matrix_room):
     lock = MatrixLock(room_id=room_id)
 
     # patch the create_filter function with a mock
-    with patch("taskiq_matrix.lock.create_filter", new_callable=MagicMock) as mock_create_filter:
+    with patch(
+        "taskiq_matrix.lock.create_room_message_filter", new_callable=MagicMock
+    ) as mock_create_filter:
         # call create_filter without passing a room_id
         lock.create_filter(room_id=None)
 
@@ -137,7 +150,9 @@ async def test_matrix_lock_create_filter_given_room_id(new_matrix_room):
     lock = MatrixLock(room_id=room_id)
 
     # patch the create_filter function with a mock
-    with patch("taskiq_matrix.lock.create_filter", new_callable=MagicMock) as mock_create_filter:
+    with patch(
+        "taskiq_matrix.lock.create_room_message_filter", new_callable=MagicMock
+    ) as mock_create_filter:
         # call create_filter and pass a room id
         lock.create_filter(room_id="test room id")
 
@@ -364,6 +379,7 @@ async def test_matrix_lock_lock_functional_test(new_matrix_room):
         # verify that the lock id yielded by lock() matches the lock_id
         assert lock_id == "test_lock_id"
 
+
 async def test_matrix_lock_acquire_lock_not_acquired(new_matrix_room):
     """
     Tests that a lock is not acquired if a filter is returned with a different room_id
@@ -405,6 +421,7 @@ async def test_matrix_lock_acquire_lock_not_acquired(new_matrix_room):
         mock_logger.info.assert_called_once()
     MatrixLock.next_batch = None
 
+
 async def test_matrix_lock_acquire_lock_existing_next_batch(new_matrix_room):
     """
     Tests that get_latest_sync_token is not called if the lock already had a next batch
@@ -414,7 +431,7 @@ async def test_matrix_lock_acquire_lock_existing_next_batch(new_matrix_room):
     room_id = await new_matrix_room()
     lock = MatrixLock(room_id=room_id)
 
-    # set the lock's next_batch 
+    # set the lock's next_batch
     lock.next_batch = await lock.get_latest_sync_token()
 
     # patch get_latest_sync_token to verify function calls
@@ -542,8 +559,8 @@ async def test_matrix_lock_filter_syncerror(new_matrix_room):
 
     # mock the lock's client's sync function and have it return a SyncError
     mock_sync = AsyncMock()
-    mock_sync.return_value = SyncError(message="test error message")
-    lock.client.sync = mock_sync
+    mock_sync.return_value = RoomMessagesError(message="test error message")
+    lock.client.room_messages = mock_sync
 
     # call filter to raise an exception
     with pytest.raises(Exception) as e:
@@ -596,3 +613,56 @@ async def test_matrix_lock_get_latest_sync_token_good_response(new_matrix_room):
     result = await lock.get_latest_sync_token()
     assert result == "test token"
     MatrixLock.next_batch = None
+
+
+async def test_matrix_lock_acquired(
+    matrix_client: FractalAsyncClient,
+    new_matrix_room: Callable[[], Awaitable[str]],
+    aio_benchmark,
+):
+    """
+    Ensure that a lock can be acquired, and if it is acquired,
+    it can't be acquired again.
+    """
+    test_room_id = await new_matrix_room()
+
+    @aio_benchmark
+    async def test():
+        # generate a unique key to lock on
+        key = str(uuid4())
+        async with MatrixLock(room_id=test_room_id).lock(key) as lock_id:
+            # verify that lock is acquired
+            res = await run_sync_filter(
+                matrix_client,
+                create_filter(test_room_id, types=[f"fn.lock.acquire.{key}"]),
+                timeout=0,
+            )
+            assert res[test_room_id][0]["msgtype"] == f"fn.lock.acquire.{key}"
+            assert json.loads(res[test_room_id][0]["body"])["lock_id"] == lock_id
+
+
+async def test_matrix_lock_acquired_no_reacquire(
+    matrix_client: FractalAsyncClient, new_matrix_room: Callable[[], Awaitable[str]]
+):
+    """
+    Ensure that a lock can be acquired, and if it is acquired,
+    it can't be acquired again.
+    """
+    # generate a unique key to lock on
+    key = str(uuid4())
+    test_room_id = await new_matrix_room()
+
+    async with MatrixLock(room_id=test_room_id).lock(key) as lock_id:
+        # verify that lock is acquired
+        res = await run_sync_filter(
+            matrix_client,
+            create_filter(test_room_id, types=[f"fn.lock.acquire.{key}"]),
+            timeout=0,
+        )
+        assert res[test_room_id][0]["msgtype"] == f"fn.lock.acquire.{key}"
+        assert json.loads(res[test_room_id][0]["body"])["lock_id"] == lock_id
+
+        with pytest.raises(LockAcquireError):
+            # attempting to acquire the lock again should fail since it's already acquired
+            async with MatrixLock(room_id=test_room_id).lock(key):
+                assert False  # should never get here

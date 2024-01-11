@@ -3,8 +3,10 @@ import os
 import pickle
 import socket
 from base64 import b64decode, b64encode
-from typing import Dict, Optional, TypeVar, Union
+from typing import Any, Dict, Optional, TypeVar, Union
+from uuid import uuid4
 
+from async_lru import alru_cache
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import MessageDirection, RoomMessagesError
 from taskiq import AsyncResultBackend
@@ -15,7 +17,7 @@ from .exceptions import (
     ExpireTimeMustBeMoreThanZeroError,
     ResultDecodeError,
 )
-from .filters import create_filter, run_sync_filter
+from .filters import create_room_message_filter, run_room_message_filter
 from .utils import send_message
 
 _ReturnType = TypeVar("_ReturnType")
@@ -107,6 +109,35 @@ class MatrixResultBackend(AsyncResultBackend):
             msgtype=f"taskiq.result.{task_id}",
         )
 
+    @alru_cache(maxsize=64, ttl=60)
+    async def _fetch_result_from_matrix(self, task_id: str) -> dict[str, Any]:
+        """
+        Fetches task result from matrix. Caches the result for 60 seconds.
+
+        TODO: Handle waiting for a number of results for a task
+
+        :param task_id: ID of the task.
+        :return: list of task results.
+        """
+        if not self.next_batch:
+            latest_next_batch = await self.matrix_client.get_latest_sync_token(self.room)
+            self.next_batch = latest_next_batch
+            self.matrix_client.next_batch = latest_next_batch
+
+        message_filter = create_room_message_filter(self.room, types=[f"taskiq.result.{task_id}"])
+        # cache the next batch token from kick so we can use it later when getting the result
+        # need to do this because when we sync below here, the client's next_batch token will
+        # be updated to the latest sync token, which will be after the result we're looking for
+
+        result, next_batch = await run_room_message_filter(
+            self.matrix_client,
+            self.room,
+            message_filter,
+            since=self.matrix_client.next_batch,
+            direction=MessageDirection.back,
+        )
+        return result
+
     async def is_result_ready(self, task_id: str) -> bool:
         """
         Returns whether the result is ready.
@@ -115,21 +146,7 @@ class MatrixResultBackend(AsyncResultBackend):
 
         :returns: True if the result is ready else False.
         """
-        if not self.next_batch:
-            res = await self.matrix_client.room_messages(
-                self.room, start="", limit=1, direction=MessageDirection.front
-            )
-            if not isinstance(res, RoomMessagesError):
-                self.next_batch = res.start
-                self.matrix_client.next_batch = res.start
-
-        sync_filter = create_filter(self.room, types=[f"taskiq.result.{task_id}"])
-        # cache the next batch token from kick so we can use it later when getting the result
-        # need to do this because when we sync below here, the client's next_batch token will
-        # be updated to the latest sync token, which will be after the result we're looking for
-        result = await run_sync_filter(
-            self.matrix_client, sync_filter, timeout=0, since=self.matrix_client.next_batch
-        )
+        result = await self._fetch_result_from_matrix(task_id)
         return True if result.get(self.room) else False
 
     async def get_result(
@@ -147,12 +164,7 @@ class MatrixResultBackend(AsyncResultBackend):
         :raises ResultDecodeError: if there is an error decoding the result.
         :return: task's return value.
         """
-
-        sync_filter = create_filter(self.room, types=[f"taskiq.result.{task_id}"])
-        result_object = await run_sync_filter(
-            self.matrix_client, sync_filter, timeout=0, since=self.next_batch
-        )
-        # TODO: handle waiting for a number of results for a task
+        result_object = await self._fetch_result_from_matrix(task_id)
 
         try:
             result = result_object[self.room][0]

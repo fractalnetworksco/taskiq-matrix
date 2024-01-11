@@ -6,9 +6,11 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 from fractal.matrix import FractalAsyncClient
 from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
+
 from taskiq_matrix.matrix_broker import MatrixBroker
 from taskiq_matrix.matrix_queue import Checkpoint, Task
 from taskiq_matrix.matrix_result_backend import MatrixResultBackend
@@ -48,12 +50,12 @@ def new_matrix_room(matrix_client: FractalAsyncClient):
 
 
 @pytest.fixture(scope="function")
-def test_matrix_result_backend(new_matrix_room):
+def test_matrix_result_backend(new_matrix_room) -> Callable[[], Awaitable[MatrixResultBackend]]:
     """
     Creates a MatrixResultBackend object
     """
 
-    async def create():
+    async def create() -> MatrixResultBackend:
         room_id = await new_matrix_room()
         return MatrixResultBackend(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
@@ -184,7 +186,51 @@ def test_iterable_tasks(unknown_event_factory):
                 "test_sender",
             )
 
-            tasks.append(Task(**event.source['content']))
+            tasks.append(Task(**event.source["content"]))
 
         return MockAsyncIterable([tasks])
+
     return factory
+
+
+@pytest.yield_fixture(scope="function")
+def aio_benchmark(benchmark):
+    import asyncio
+    import threading
+
+    class Sync2Async:
+        def __init__(self, coro, *args, **kwargs):
+            self.coro = coro
+            self.args = args
+            self.kwargs = kwargs
+            self.custom_loop = None
+            self.thread = None
+
+        def start_background_loop(self) -> None:
+            asyncio.set_event_loop(self.custom_loop)
+            self.custom_loop.run_forever()
+
+        def __call__(self):
+            evloop = None
+            awaitable = self.coro(*self.args, **self.kwargs)
+            try:
+                evloop = asyncio.get_running_loop()
+            except:
+                pass
+            if evloop is None:
+                return asyncio.run(awaitable)
+            else:
+                if not self.custom_loop or not self.thread or not self.thread.is_alive():
+                    self.custom_loop = asyncio.new_event_loop()
+                    self.thread = threading.Thread(target=self.start_background_loop, daemon=True)
+                    self.thread.start()
+
+                return asyncio.run_coroutine_threadsafe(awaitable, self.custom_loop).result()
+
+    def _wrapper(func, *args, **kwargs):
+        if asyncio.iscoroutinefunction(func):
+            benchmark(Sync2Async(func, *args, **kwargs))
+        else:
+            benchmark(func, *args, **kwargs)
+
+    return _wrapper
