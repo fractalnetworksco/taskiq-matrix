@@ -172,6 +172,8 @@ class MatrixLock:
             )
 
             # filter again to make sure that we got the lock
+            # all mutex tasks from the beginning of room history will be returned, we should
+            # figure out a way to optomize this
             res = await self.filter(self.create_filter(types=[f"fn.lock.acquire.{key}"]))
             if res[self.room_id] and res[self.room_id][0]["lock_id"] == self.lock_id:
                 return True
