@@ -50,10 +50,7 @@ class MatrixLock:
         self.client.access_token = access_token
         self.room_id = room_id
         self.lock_id = str(uuid4())
-        if MatrixLock.next_batch:
-            self.next_batch = MatrixLock.next_batch
-        else:
-            self.next_batch = None
+        self.next_batch = None
         setup_console_logging()
 
     def create_filter(
@@ -158,16 +155,13 @@ class MatrixLock:
             wait (bool): whether to wait for the lock to be available
         """
         lock_types = [f"fn.lock.acquire.{key}", f"fn.lock.release.{key}"]
-        if not self.next_batch:
-            self.next_batch = await self.get_latest_sync_token()
-            # because we create a new instance of a lock each time, we cache
-            # a next batch that we can use for subsequent invocations of locks.
-            # FIXME: this should be advanced
-            MatrixLock.next_batch = self.next_batch
+        # because we create a new instance of a lock each time, we cache
+        # a next batch that we can use for subsequent invocations of locks.
+        # FIXME: this should be advanced
         res = await self.filter(
             self.create_filter(types=lock_types), timeout=0, since=self.next_batch
         )
-        self.next_batch = self.client.next_batch
+        self.next_batch = await self.get_latest_sync_token()
 
         # if last event is a lock release or the lock types dont exist in the room,
         # we can acquire the lock
@@ -201,9 +195,8 @@ class MatrixLock:
         """
         logger.debug("Next batch is %s" % self.next_batch)
         result, next_batch = await run_room_message_filter(
-            self.client, self.room_id, filter, since=self.next_batch, content_only=True
+            self.client, self.room_id, filter, since=self.next_batch, content_only=True, direction=MessageDirection.front
         )
-        self.client.next_batch = next_batch  # type: ignore
         rooms = list(result.keys())
         d = {}
         for room in rooms:

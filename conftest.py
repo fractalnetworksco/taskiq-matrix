@@ -87,14 +87,15 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
         Creates a MatrixBroker instance whose queues are configured to
         use a new room each time the fixture is called.
         """
-        room_id = await new_matrix_room()
+        new_room_id = await new_matrix_room()
+        # os.environ['MATRIX_ROOM_ID'] = room_id
 
         broker = MatrixBroker()
 
         # set the broker's room id
-        broker.room_id = room_id
+        # broker.room_id = room_id
         broker.with_matrix_config(
-            room_id, os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
+            new_room_id, os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
         )
 
         # use room_id for the queues

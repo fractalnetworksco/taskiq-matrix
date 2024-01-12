@@ -54,7 +54,7 @@ async def test_tasks_update_checkpoint_is_replicated_queue(test_matrix_broker):
     mock_get_or_init.assert_called_with(full_sync=True)
 
 
-async def test_tasks_update_checkpoint_no_tasks(test_matrix_broker):
+async def test_tasks_update_checkpoint_no_tasks(test_matrix_broker, new_matrix_room):
     """
     Tests that the "if tasks:" block of code does not run if there are no tasks in the
     queue.
@@ -63,12 +63,14 @@ async def test_tasks_update_checkpoint_no_tasks(test_matrix_broker):
     # create a MatrixBroker object from fixture
     broker = await test_matrix_broker()
 
-    # patch the get_first_unacked_task function to verify it was not called
-    with patch("taskiq_matrix.tasks.get_first_unacked_task") as mock_get_first_unacked:
-        # patch the logger to verify its function calls
-        with patch("taskiq_matrix.tasks.logger") as mock_logger:
-            # call update_checkpoint
-            result = await update_checkpoint("mutex")
+    os.environ['MATRIX_ROOM_ID'] = broker.room_id
+    with patch('taskiq_matrix.tasks.broker', broker):
+        # patch the get_first_unacked_task function to verify it was not called
+        with patch("taskiq_matrix.tasks.get_first_unacked_task") as mock_get_first_unacked:
+            # patch the logger to verify its function calls
+            with patch("taskiq_matrix.tasks.logger") as mock_logger:
+                # call update_checkpoint
+                result = await update_checkpoint("mutex")
 
         # verify that get_first_unacked_task was not called
         mock_get_first_unacked.assert_not_awaited()
