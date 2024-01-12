@@ -13,6 +13,7 @@ from taskiq_matrix.filters import (
     get_first_unacked_task,
     run_room_message_filter,
     run_sync_filter,
+    MessageDirection
 )
 from taskiq_matrix.matrix_queue import TaskTypes
 
@@ -344,37 +345,117 @@ async def test_filters_run_room_message_filter_content_only(
     test_multiple_broker_message,
     test_matrix_broker,
 ):
-    """ 
-    ! got this test semi-working but check what you're testing again
+    """
+    Tests that only the content dictionary, sender, and event ID are returned when content_onlyl
+    is set to True.
     """
 
+    # create a broker object
     broker = await test_matrix_broker()
     queue = broker.mutex_queue
     client = queue.client
     room_id: str = client.room_id  # type:ignore
 
+    # create a list of broker messages
     num_messages = 3
     messages = await test_multiple_broker_message(num_messages)
 
+    # kick the tasks to the broker and save the IDs in a separate list
     task_ids = []
     for message in messages:
         await broker.kick(message)
         task_ids.append(message.task_id)
 
+    # create a room room message filter
     task_filter = create_room_message_filter(
         broker.room_id,
         types=[queue.task_types.task, f"{queue.task_types.ack}.*"],
     )
 
-    # Call the run_sync_filter function
-    result, _ = await run_room_message_filter(
-        client, room_id, task_filter, content_only=True
-    )
-    
+    # Call the run_room_message_filter function passing content_only as True
+    result, _ = await run_room_message_filter(client, room_id, task_filter, content_only=True)
+
     for i in range(num_messages):
-        assert result[room_id][i]['body']['task_id'] == task_ids[i]
+        # verify that events returned match the IDs created locally
+        assert result[room_id][i]["body"]["task_id"] == task_ids[i]
+        assert result[room_id][i]["msgtype"] == "taskiq.mutex.task"
+        assert result[room_id][i]["body"]["queue"] == "mutex"
+        assert "sender" in result[room_id][i]
+        assert "event_id" in result[room_id][i]
+
+        # verify that top-level keys are present when content_only is set to False are
+        # not present in the dictionary
+        assert "room_id" not in result[room_id][i]
+        assert "type" not in result[room_id][i]
 
 
+async def test_filters_run_room_message_filter_not_content_only(
+    test_matrix_broker, test_multiple_broker_message
+):
+    """ 
+    Tests that if content_only is passed as False, a dictionary containing more information
+    is returned and has the "content" dictionary nested in it.
+    """
 
-async def test_filters_run_room_message_filter_():
-    """ """
+    # create a broker object
+    broker = await test_matrix_broker()
+    queue = broker.mutex_queue
+    client = queue.client
+    room_id: str = client.room_id  # type:ignore
+
+    # create a list of broker messages
+    num_messages = 3
+    messages = await test_multiple_broker_message(num_messages)
+
+    # kick the tasks to the broker and save the IDs in a separate list
+    task_ids = []
+    for message in messages:
+        await broker.kick(message)
+        task_ids.append(message.task_id)
+
+    # create a room room message filter
+    task_filter = create_room_message_filter(
+        broker.room_id,
+        types=[queue.task_types.task, f"{queue.task_types.ack}.*"],
+    )
+
+    # Call the run_room_message_filter function passing content_only as False
+    result, _ = await run_room_message_filter(client, room_id, task_filter, content_only=False)
+
+    for i in range(num_messages):
+        # verify that events returned match the IDs created locally
+        assert result[room_id][i]['content']['body']['task_id'] == task_ids[i]
+        assert "type" in result[room_id][i]
+        assert "room_id" in result[room_id][i]
+        assert "origin_server_ts" in result[room_id][i]
+
+async def test_filters_run_room_message_filter_sync_token_return_cases(test_matrix_broker):
+    """
+    Tests the different cases of sync token returns, whether you are syncing from the front
+    or syncing from the back.
+    """
+
+    # create a broker object
+    broker = await test_matrix_broker()
+    queue = broker.mutex_queue
+    client = queue.client
+    room_id: str = client.room_id  # type:ignore
+
+
+    # create a room room message filter
+    task_filter = create_room_message_filter(
+        broker.room_id,
+        types=[queue.task_types.task, f"{queue.task_types.ack}.*"],
+    )
+
+    # Call the run_room_message_filter function 
+    _, back_sync_token = await run_room_message_filter(client, room_id, task_filter, direction=MessageDirection.back)
+    _, front_sync_token = await run_room_message_filter(client, room_id, task_filter, direction=MessageDirection.front)
+
+    # verify that syncing from the front returns a sync token reflecting the beginning of
+        # the room history and verify that syncing from the back does NOT return the same
+        # token
+    assert front_sync_token == "s0_0_0_0_0_0_0_0_0_0"
+    assert back_sync_token != "s0_0_0_0_0_0_0_0_0_0"
+
+
