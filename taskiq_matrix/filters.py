@@ -157,6 +157,7 @@ async def run_room_message_filter(
     since: Optional[str] = None,
     content_only: bool = True,
     direction: MessageDirection = MessageDirection.front,
+    limit: int = 100,
 ) -> Tuple[Dict[str, Any], Optional[str]]:
     """
     Execute a room message request with the provided client attempts to deserialize json
@@ -166,7 +167,7 @@ async def run_room_message_filter(
         room_id,
         start=since,
         end="" if direction == MessageDirection.back else None,
-        limit=100,
+        limit=limit,
         direction=direction,
         message_filter=filter,
     )

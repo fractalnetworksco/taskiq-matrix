@@ -158,14 +158,14 @@ class MatrixLock:
         # because we create a new instance of a lock each time, we cache
         # a next batch that we can use for subsequent invocations of locks.
         # FIXME: this should be advanced
-        res = await self.filter(
-            self.create_filter(types=lock_types), timeout=0, since=self.next_batch
+        res, next_batch = await self.filter(
+            self.create_filter(types=lock_types), limit=1, message_direction=MessageDirection.back
         )
-        self.next_batch = await self.get_latest_sync_token()
+        self.next_batch = next_batch
 
         # if last event is a lock release or the lock types dont exist in the room,
         # we can acquire the lock
-        if self.room_id not in res or res[self.room_id][-1]["type"] == f"fn.lock.release.{key}":
+        if self.room_id not in res or res[self.room_id][0]["type"] == f"fn.lock.release.{key}":
             await self.send_message(
                 {"type": f"fn.lock.acquire.{key}", "lock_id": self.lock_id},
                 msgtype=f"fn.lock.acquire.{key}",
@@ -174,7 +174,7 @@ class MatrixLock:
             # filter again to make sure that we got the lock
             # all mutex tasks from the beginning of room history will be returned, we should
             # figure out a way to optomize this
-            res = await self.filter(self.create_filter(types=[f"fn.lock.acquire.{key}"]))
+            res, _ = await self.filter(self.create_filter(types=[f"fn.lock.acquire.{key}"]))
             if res[self.room_id] and res[self.room_id][0]["lock_id"] == self.lock_id:
                 return True
             else:
@@ -188,16 +188,21 @@ class MatrixLock:
     async def filter(
         self,
         filter: dict,
-        timeout: int = 3000,
-        since: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        limit: int = 100,
+        message_direction: MessageDirection = MessageDirection.front,
+    ) -> tuple[Dict[str, Any], Optional[str]]:
         """
         execute a filter with the client, optionally filter message body by kwargs
         attempts to deserialize json
         """
         logger.debug("Next batch is %s" % self.next_batch)
         result, next_batch = await run_room_message_filter(
-            self.client, self.room_id, filter, since=self.next_batch, content_only=True, direction=MessageDirection.front
+            self.client,
+            self.room_id,
+            filter,
+            since=self.next_batch,
+            content_only=True,
+            direction=message_direction,
         )
         rooms = list(result.keys())
         d = {}
@@ -208,7 +213,7 @@ class MatrixLock:
                     [event["body"] for event in result[room]],
                 )
             )
-        return d
+        return d, next_batch
 
     async def get_latest_sync_token(self) -> str:
         """
