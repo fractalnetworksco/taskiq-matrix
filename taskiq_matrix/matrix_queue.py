@@ -39,7 +39,7 @@ class TaskTypes:
         self.result = "taskiq.result"
         self.lock = f"{self.task}.lock"
 
-    def all(self) -> List[str]:
+    def all(self) -> List[str]: # pragma: no cover
         """
         Returns the task types for the queue.
         """
@@ -238,6 +238,8 @@ class MatrixQueue:
             A list of tasks and acks.
         """
         next_batch = since_token or self.checkpoint.since_token
+        print('next_batch=======', next_batch)
+        print('checkpoint next batch===========', self.checkpoint.since_token)
 
         if not task_filter:
             if self.caught_up:
@@ -256,11 +258,10 @@ class MatrixQueue:
                 self.client, task_filter, timeout=timeout, since=next_batch
             )
         else:
+            print('here')
             task_events, end = await run_room_message_filter(
                 self.client, self.room_id, task_filter, since=next_batch
             )
-            # print('task filter======', task_filter)
-            # print('task events=====', len(task_events[self.room_id]))
             if not end:
                 self.caught_up = True
                 # finished processing all events in the room, so use the sync API

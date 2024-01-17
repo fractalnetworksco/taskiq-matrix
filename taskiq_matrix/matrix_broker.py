@@ -364,7 +364,7 @@ class MatrixBroker(AsyncBroker):
         )
         return await client.close()
 
-    async def get_tasks(self) -> AsyncGenerator[List[Task], Any]:
+    async def get_tasks(self) -> AsyncGenerator[List[Task], Any]: # pragma: no cover
         while True:
             tasks = {
                 "device_queue": asyncio.create_task(

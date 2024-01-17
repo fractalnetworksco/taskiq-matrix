@@ -211,7 +211,8 @@ async def test_matrix_queue_get_tasks_existing_filter_not_caught_up(test_matrix_
 
 async def test_matrix_queue_get_tasks_existing_filter_caught_up(test_matrix_broker, test_broker_message):
     """
-    #? not related to this test but how do you hit "not end:" ?
+    Tests that if you pass a filter and the broker is caught up, new filters are not
+    created and run_sync_filter is called instead of run_room_message_filter
     """
 
     # create a broker object
@@ -249,7 +250,7 @@ async def test_matrix_queue_get_tasks_existing_filter_caught_up(test_matrix_brok
     
 async def test_matrix_queue_get_tasks_not_end(test_matrix_broker, test_broker_message):
     """
-    ! fix this test
+    
     """
 
     # create a broker object
@@ -259,11 +260,14 @@ async def test_matrix_queue_get_tasks_not_end(test_matrix_broker, test_broker_me
     message = test_broker_message
     await broker.kick(message)
 
-    await broker.mutex_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
-
-    print('full sync')
+    checkpoint = await broker.mutex_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
+    assert checkpoint == broker.mutex_queue.checkpoint.since_token
 
     tasks = await broker.mutex_queue.get_tasks(timeout=0)
+    assert checkpoint != broker.mutex_queue.checkpoint.since_token
+    assert broker.mutex_queue.caught_up is False
+    tasks = await broker.mutex_queue.get_tasks(timeout=0)
+    assert broker.mutex_queue.caught_up is True
 
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
