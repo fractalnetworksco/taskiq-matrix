@@ -4,10 +4,11 @@ import os
 from typing import Any, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
+from fractal.matrix import FractalAsyncClient
 
 import pytest
 import pytest_asyncio
-from fractal.matrix import FractalAsyncClient
+from fractal.matrix.async_client import FractalAsyncClient
 from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
 
@@ -86,14 +87,15 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
         Creates a MatrixBroker instance whose queues are configured to
         use a new room each time the fixture is called.
         """
-        room_id = await new_matrix_room()
+        new_room_id = await new_matrix_room()
+        # os.environ['MATRIX_ROOM_ID'] = room_id
 
         broker = MatrixBroker()
 
         # set the broker's room id
-        broker.room_id = room_id
+        # broker.room_id = room_id
         broker.with_matrix_config(
-            room_id, os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
+            new_room_id, os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
         )
 
         # use room_id for the queues
@@ -124,6 +126,31 @@ def test_broker_message():
     # create the BrokerMessage object
     return BrokerMessage(task_id=task_id, task_name="test_name", message=message_bytes, labels={})
 
+@pytest.fixture
+def test_multiple_broker_message():
+    """
+    Create a BrokerMessage Fixture
+    """
+    async def create(num_messages: int):
+        messages = []
+        for i in range(num_messages):
+            task_id = str(uuid4())
+            message = {
+                "task_id": task_id,
+                "foo": "bar",
+            }
+
+            # convert the message into json
+            message_string = json.dumps(message)
+
+            # encode the message into message bytes
+            message_bytes = message_string.encode("utf-8")
+
+            messages.append(BrokerMessage(task_id=task_id, task_name="test_name", message=message_bytes, labels={}))
+
+        # create the BrokerMessage object
+        return messages
+    return create
 
 @pytest.fixture(scope="function")
 def test_checkpoint(test_room_id):
@@ -132,7 +159,6 @@ def test_checkpoint(test_room_id):
         content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
     )
     return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
-
 
 @pytest.fixture
 def test_room_id() -> str:

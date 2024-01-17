@@ -13,8 +13,13 @@ from uuid import uuid4
 import pytest
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import AsyncClient, MatrixRoom, RoomMessagesResponse, SyncResponse
+
 from taskiq_matrix.exceptions import LockAcquireError
-from taskiq_matrix.filters import create_filter, run_sync_filter
+from taskiq_matrix.filters import (
+    create_filter,
+    create_room_message_filter,
+    run_room_message_filter,
+)
 from taskiq_matrix.lock import (
     LockAcquireError,
     MatrixLock,
@@ -75,47 +80,6 @@ async def test_matrix_lock_constructor_missing_room_id():
 
     # verify that the exception raised matches expectations
     assert expected_error == str(e.value)
-
-
-async def test_matrix_lock_constructor_no_next_batch(new_matrix_room):
-    """
-    Tests that if there is no pre-set next_batch for the MatrixLock class, None is used
-    """
-
-    # patch the setup_console_logging() function to verify it was called
-    room_id = await new_matrix_room()
-    with patch(
-        "taskiq_matrix.lock.setup_console_logging", new_awaitable=AsyncMock
-    ) as mock_console_log:
-        # ensure that the MatrixLock class' next_batch attribute is None
-        with patch("taskiq_matrix.lock.MatrixLock.next_batch", None):
-            lock = MatrixLock(room_id=room_id)
-
-            # verify that the patched function was called
-            mock_console_log.assert_called_once()
-
-            # verify that the lock object's next_batch is None
-            assert lock.next_batch == None
-
-
-async def test_matrix_lock_constructor_existing_next_batch(new_matrix_room):
-    """
-    Tests that if the MatrixLock has a next_batch, the new MatrixLock object is
-    given the existing next_batch
-    """
-
-    # set the next batch for the MatrixLock class
-    MatrixLock.next_batch = "test_next_batch"
-
-    # create a matrix lock object
-    room_id = await new_matrix_room()
-    lock = MatrixLock(room_id=room_id)
-
-    # verify that the lock object's next_batch matches what was set for the class
-    assert lock.next_batch == "test_next_batch"
-
-    # reset the MatrixLock class' next_batch
-    MatrixLock.next_batch = None
 
 
 async def test_matrix_lock_create_filter_no_room_id(new_matrix_room):
@@ -389,19 +353,21 @@ async def test_matrix_lock_acquire_lock_not_acquired(new_matrix_room):
 
     # create a lock object
     lock = MatrixLock(room_id=room_id)
-    lock.next_batch = await lock.get_latest_sync_token()
 
     # mock the lock's filter function and set its return values
     mock_filter = AsyncMock()
-    second_call = {
-        lock.room_id: [
-            {
-                "type": "fn.lock.acquire.None",
-                "lock_id": "not_the_same_lock_id",
-            }
-        ]
-    }
-    mock_filter.side_effect = [{}, second_call]
+    second_call = (
+        {
+            lock.room_id: [
+                {
+                    "type": "fn.lock.acquire.None",
+                    "lock_id": "not_the_same_lock_id",
+                }
+            ]
+        },
+        "next_batch_token",
+    )
+    mock_filter.side_effect = [({}, "next_batch_token"), second_call]
     lock.filter = mock_filter
 
     # patch the logger to verify function calls
@@ -419,32 +385,9 @@ async def test_matrix_lock_acquire_lock_not_acquired(new_matrix_room):
         # verify the logger.info function call, signifying that the function returned
         # False from the else block
         mock_logger.info.assert_called_once()
-    MatrixLock.next_batch = None
 
 
-async def test_matrix_lock_acquire_lock_existing_next_batch(new_matrix_room):
-    """
-    Tests that get_latest_sync_token is not called if the lock already had a next batch
-    """
-
-    # create a matrix lock object
-    room_id = await new_matrix_room()
-    lock = MatrixLock(room_id=room_id)
-
-    # set the lock's next_batch
-    lock.next_batch = await lock.get_latest_sync_token()
-
-    # patch get_latest_sync_token to verify function calls
-    with patch(
-        "taskiq_matrix.lock.MatrixLock.get_latest_sync_token", new_awaitable=AsyncMock
-    ) as mock_sync_token:
-        await lock._acquire_lock()
-
-    mock_sync_token.assert_not_awaited()
-    MatrixLock.next_batch = None
-
-
-async def test_matrix_lock_acquire_lock_no_next_batch(new_matrix_room):
+async def test_matrix_lock_set_next_batch_none(new_matrix_room):
     """
     Tests that if next_batch is set to None, get_latest_sync_token is called to get a
     sync token for the lock
@@ -454,23 +397,7 @@ async def test_matrix_lock_acquire_lock_no_next_batch(new_matrix_room):
     room_id = await new_matrix_room()
     lock = MatrixLock(room_id=room_id)
 
-    # set the next_batch to None
-    lock.next_batch = None
-
-    # mock get_latest_sync_token to return a specific string
-    lock.get_latest_sync_token = AsyncMock()
-    lock.get_latest_sync_token.return_value = "abc"
-    lock.filter = AsyncMock()
-
-    # call aquire_lock()
-    await lock._acquire_lock()
-
-    # verify that the MatrixLock class' next_batch is equal to the sync token returned
-    # by get_latest_sync_token()
-    assert MatrixLock.next_batch == "abc"
-
-    # set the MatrixLock class' next_batch back to None to not affect other tests
-    MatrixLock.next_batch = None
+    assert lock.next_batch == None
 
 
 async def test_matrix_lock_acquire_lock_room_id_not_in_res(new_matrix_room):
@@ -482,9 +409,10 @@ async def test_matrix_lock_acquire_lock_room_id_not_in_res(new_matrix_room):
     lock = MatrixLock(room_id=room_id)
 
     mock_filter = AsyncMock()
-    mock_filter.return_value = {
-        lock.room_id: [{"type": "fn.lock.acquire.None", "lock_id": lock.lock_id}]
-    }
+    mock_filter.return_value = (
+        {lock.room_id: [{"type": "fn.lock.acquire.None", "lock_id": lock.lock_id}]},
+        "next_batch_token",
+    )
     lock.filter = mock_filter
 
     mock_send_message = AsyncMock()
@@ -495,7 +423,6 @@ async def test_matrix_lock_acquire_lock_room_id_not_in_res(new_matrix_room):
     mock_send_message.assert_not_called()
     mock_filter.assert_called_once()
     assert not result
-    MatrixLock.next_batch = None
 
 
 async def test_matrix_lock_acquire_lock_room_id_in_res():
@@ -505,8 +432,11 @@ async def test_matrix_lock_acquire_lock_room_id_in_res():
     """
     lock = MatrixLock()
     mock_filter = AsyncMock()
-    second_call = {lock.room_id: [{"type": "fn.lock.acquire.None", "lock_id": lock.lock_id}]}
-    mock_filter.side_effect = [{}, second_call]
+    second_call = (
+        {lock.room_id: [{"type": "fn.lock.acquire.None", "lock_id": lock.lock_id}]},
+        "next_batch_token",
+    )
+    mock_filter.side_effect = [({}, "next_batch_token"), second_call]
     lock.filter = mock_filter
 
     mock_send_message = AsyncMock()
@@ -515,7 +445,6 @@ async def test_matrix_lock_acquire_lock_room_id_in_res():
     result = await lock._acquire_lock()
     assert result
     mock_send_message.assert_called_once()
-    MatrixLock.next_batch = None
 
 
 async def test_matrix_lock_filter_works(new_matrix_room):
@@ -531,10 +460,6 @@ async def test_matrix_lock_filter_works(new_matrix_room):
     lock = MatrixLock(room_id=room_id)
     lock_types = [f"fn.lock.acquire.test", f"fn.lock.release.test"]
 
-    # update the sync token
-    next = await lock.get_latest_sync_token()
-    lock.next_batch = next
-
     # send message to room
     await lock.send_message(
         {"test": "chicken"},
@@ -543,9 +468,9 @@ async def test_matrix_lock_filter_works(new_matrix_room):
 
     # call filter and verify that a dictionary is returned containing the message that was
     # sent to the room
-    res = await lock.filter(lock.create_filter(types=lock_types), timeout=0)
+    res, next_batch = await lock.filter(lock.create_filter(types=lock_types))
+    assert next_batch is not None
     assert lock.room_id in res
-    MatrixLock.next_batch = None
 
 
 async def test_matrix_lock_filter_syncerror(new_matrix_room):
@@ -564,11 +489,10 @@ async def test_matrix_lock_filter_syncerror(new_matrix_room):
 
     # call filter to raise an exception
     with pytest.raises(Exception) as e:
-        await lock.filter(filter={}, timeout=0)
+        await lock.filter(filter={})
 
     # verify that the error message matches what was raised
     assert "test error message" == str(e.value)
-    MatrixLock.next_batch = None
 
 
 async def test_matrix_lock_get_latest_sync_token_error(new_matrix_room):
@@ -589,7 +513,6 @@ async def test_matrix_lock_get_latest_sync_token_error(new_matrix_room):
         await lock.get_latest_sync_token()
     # verify that the exception error raised matches what was expected
     assert lock.room_id in str(e.value)
-    MatrixLock.next_batch = None
 
 
 async def test_matrix_lock_get_latest_sync_token_good_response(new_matrix_room):
@@ -612,7 +535,6 @@ async def test_matrix_lock_get_latest_sync_token_good_response(new_matrix_room):
     # call get_latest_sync_token
     result = await lock.get_latest_sync_token()
     assert result == "test token"
-    MatrixLock.next_batch = None
 
 
 async def test_matrix_lock_acquired(
@@ -632,10 +554,12 @@ async def test_matrix_lock_acquired(
         key = str(uuid4())
         async with MatrixLock(room_id=test_room_id).lock(key) as lock_id:
             # verify that lock is acquired
-            res = await run_sync_filter(
+            res, _ = await run_room_message_filter(
                 matrix_client,
-                create_filter(test_room_id, types=[f"fn.lock.acquire.{key}"]),
-                timeout=0,
+                test_room_id,
+                create_room_message_filter(
+                    room_id=test_room_id, types=[f"fn.lock.acquire.{key}"]
+                ),
             )
             assert res[test_room_id][0]["msgtype"] == f"fn.lock.acquire.{key}"
             assert json.loads(res[test_room_id][0]["body"])["lock_id"] == lock_id
@@ -654,10 +578,10 @@ async def test_matrix_lock_acquired_no_reacquire(
 
     async with MatrixLock(room_id=test_room_id).lock(key) as lock_id:
         # verify that lock is acquired
-        res = await run_sync_filter(
+        res, _ = await run_room_message_filter(
             matrix_client,
-            create_filter(test_room_id, types=[f"fn.lock.acquire.{key}"]),
-            timeout=0,
+            test_room_id,
+            create_room_message_filter(room_id=test_room_id, types=[f"fn.lock.acquire.{key}"]),
         )
         assert res[test_room_id][0]["msgtype"] == f"fn.lock.acquire.{key}"
         assert json.loads(res[test_room_id][0]["body"])["lock_id"] == lock_id

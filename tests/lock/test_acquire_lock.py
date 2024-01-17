@@ -15,6 +15,7 @@ async def test_acquire_lock_success(new_matrix_room: Callable[[], Awaitable[str]
 
     async def get_lock(key: str) -> bool:
         async with MatrixLock(room_id=room_id).lock(key) as lock_id:
+            await asyncio.sleep(1)
             assert lock_id is not None
         return True
 
