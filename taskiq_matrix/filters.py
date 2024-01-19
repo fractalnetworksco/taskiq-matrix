@@ -187,9 +187,6 @@ async def run_room_message_filter(
         else:
             d[room_id] = [event.source for event in res.chunk]
 
-    print('start=====', res.start)
-    print('end=====', res.end)
-    
     if direction == MessageDirection.back:
         return d, res.start
     else:

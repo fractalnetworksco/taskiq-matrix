@@ -96,7 +96,6 @@ async def test_matrix_queue_get_tasks_(test_matrix_broker):
         "queue": "mutex",
         "msgtype": matrix_queue.task_types.task,
     }
-    print('msgtype=======', event2['msgtype'])
 
     # send messages to the queue
     await send_message(
@@ -123,18 +122,15 @@ async def test_matrix_queue_get_tasks_(test_matrix_broker):
         msgtype=event3["msgtype"],
         task_id=event3["task_id"],
     )
-    print('roomid=====', matrix_queue.room_id)
 
     matrix_queue.checkpoint.since_token = None
 
     result = await matrix_queue.get_tasks(timeout=0)
     print(result)
-    print('lenth of list======', len(result))
 
     matrix_queue.checkpoint.since_token = None
     result = await matrix_queue.get_tasks(timeout=0)
     print(result)
-    print('lenth of list======', len(result))
     await matrix_queue.shutdown()
 
 async def test_matrix_queue_get_tasks_no_filter_caught_up(test_matrix_broker, test_broker_message):

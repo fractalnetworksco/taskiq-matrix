@@ -238,8 +238,6 @@ class MatrixQueue:
             A list of tasks and acks.
         """
         next_batch = since_token or self.checkpoint.since_token
-        print('next_batch=======', next_batch)
-        print('checkpoint next batch===========', self.checkpoint.since_token)
 
         if not task_filter:
             if self.caught_up:
@@ -258,7 +256,6 @@ class MatrixQueue:
                 self.client, task_filter, timeout=timeout, since=next_batch
             )
         else:
-            print('here')
             task_events, end = await run_room_message_filter(
                 self.client, self.room_id, task_filter, since=next_batch
             )
