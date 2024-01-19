@@ -2,7 +2,7 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 from uuid import uuid4
 
-if TYPE_CHECKING:
+if TYPE_CHECKING: # pragma: no cover
     from taskiq_matrix.matrix_queue import TaskTypes
 
 from fractal.matrix.async_client import FractalAsyncClient
@@ -163,10 +163,16 @@ async def run_room_message_filter(
     Execute a room message request with the provided client attempts to deserialize json
     """
     since = since or ""
+
+    end = None
+
+    if direction == MessageDirection.back:
+        end = ""
+
     res = await client.room_messages(
         room_id,
         start=since,
-        end="" if direction == MessageDirection.back else None,
+        end=end,
         limit=limit,
         direction=direction,
         message_filter=filter,
@@ -181,8 +187,10 @@ async def run_room_message_filter(
         else:
             d[room_id] = [event.source for event in res.chunk]
 
-    return d, res.start if MessageDirection.back else res.end
-
+    if direction == MessageDirection.back:
+        return d, res.start
+    else:
+        return d, res.end
 
 async def get_first_unacked_task(
     tasks: list[Dict[str, Any]], task_types: "TaskTypes"

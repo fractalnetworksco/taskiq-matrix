@@ -431,8 +431,9 @@ async def test_filters_run_room_message_filter_not_content_only(
 
 async def test_filters_run_room_message_filter_sync_token_return_cases(test_matrix_broker):
     """
-    Tests the different cases of sync token returns, whether you are syncing from the front
-    or syncing from the back.
+    Tests that passing MessageDirection.front as a paramter returns None as a sync token
+    and MessageDirection.back returns a sync token that is not None and is not the sync
+    token that points at the start of the room's history
     """
 
     # create a broker object
@@ -441,7 +442,6 @@ async def test_filters_run_room_message_filter_sync_token_return_cases(test_matr
     client = queue.client
     room_id: str = client.room_id  # type:ignore
 
-
     # create a room room message filter
     task_filter = create_room_message_filter(
         broker.room_id,
@@ -449,13 +449,14 @@ async def test_filters_run_room_message_filter_sync_token_return_cases(test_matr
     )
 
     # Call the run_room_message_filter function 
-    _, back_sync_token = await run_room_message_filter(client, room_id, task_filter, direction=MessageDirection.back)
     _, front_sync_token = await run_room_message_filter(client, room_id, task_filter, direction=MessageDirection.front)
+    _, back_sync_token = await run_room_message_filter(client, room_id, task_filter, direction=MessageDirection.back)
 
-    # verify that syncing from the front returns a sync token reflecting the beginning of
-        # the room history and verify that syncing from the back does NOT return the same
-        # token
-    assert front_sync_token == "s0_0_0_0_0_0_0_0_0_0"
-    assert back_sync_token != "s0_0_0_0_0_0_0_0_0_0"
+    # verify that syncing from the front returns an empty sync token and that
+        # syncing from the back returns a sync token that is not None and is not
+        # the "s0" sync token signifying the start of the room's history
+    assert front_sync_token is None
+    assert back_sync_token is not None
+    assert back_sync_token is not "s0_0_0_0_0_0_0_0_0_0"
 
 
