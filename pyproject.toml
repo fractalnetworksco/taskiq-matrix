@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "taskiq-matrix"
-version = "0.0.6"
+version = "0.0.7"
 description = ""
 authors = ["Mo Balaa <balaa@ether.ai>"]
 readme = "README.md"
