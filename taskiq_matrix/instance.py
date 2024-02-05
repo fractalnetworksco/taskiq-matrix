@@ -7,7 +7,7 @@ from taskiq_matrix.matrix_result_backend import MatrixResultBackend
 from taskiq_matrix.schedulesource import MatrixRoomScheduleSource
 
 broker = (
-    MatrixBroker()
+    MatrixBroker(plugin_module="taskiq.plugins")
     .with_matrix_config(
         room_id=os.environ.get("MATRIX_ROOM_ID"),
         homeserver_url=os.environ.get("MATRIX_HOMESERVER_URL"),
@@ -25,4 +25,3 @@ broker = (
 )
 
 scheduler = TaskiqScheduler(broker=broker, sources=[MatrixRoomScheduleSource(broker)])
-

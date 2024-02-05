@@ -7,6 +7,7 @@ import socket
 from typing import Any, AsyncGenerator, List, Optional, Self, TypeVar, Union
 from uuid import uuid4
 
+import pkg_resources
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import RoomGetStateEventError, RoomPutStateError
 from taskiq import AckableMessage, AsyncBroker, AsyncResultBackend, BrokerMessage
@@ -67,6 +68,17 @@ class MatrixBroker(AsyncBroker):
 
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
         self.worker_id = uuid4().hex
+
+        self.plugin_module = "taskiq.plugins"
+
+    def _discover_plugin_tasks(self):
+        """
+        Discover tasks from modules that define a "taskiq.plugins" entrypoint
+        and dynamically registers them with the broker.
+        """
+        plugins = pkg_resources.iter_entry_points(self.plugin_module)
+        for entrypoint in plugins:
+            entrypoint.load()
 
     def with_matrix_config(self, room_id: str, homeserver_url: str, access_token: str) -> Self:
         self.room_id = room_id
@@ -220,6 +232,7 @@ class MatrixBroker(AsyncBroker):
         await super().startup()
 
         self._init_queues()
+        self._discover_plugin_tasks()
 
         # create and initialize queues
         await self.device_queue.checkpoint.get_or_init_checkpoint()
@@ -231,10 +244,10 @@ class MatrixBroker(AsyncBroker):
         await self.replication_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
 
         # ensure that checkpoint schedule task is added to schedules
-        await self.add_mutex_checkpoint_task()
+        # await self.add_mutex_checkpoint_task()
 
-        # launch background task that updates device checkpoints
-        self.checkpoint_updater = asyncio.create_task(self.update_checkpoints())
+        # # launch background task that updates device checkpoints
+        # self.checkpoint_updater = asyncio.create_task(self.update_checkpoints())
 
         return None
 
