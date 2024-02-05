@@ -119,21 +119,12 @@ class MatrixResultBackend(AsyncResultBackend):
         :param task_id: ID of the task.
         :return: list of task results.
         """
-        if not self.next_batch:
-            latest_next_batch = await self.matrix_client.get_latest_sync_token(self.room)
-            self.next_batch = latest_next_batch
-            self.matrix_client.next_batch = latest_next_batch
-
         message_filter = create_room_message_filter(self.room, types=[f"taskiq.result.{task_id}"])
-        # cache the next batch token from kick so we can use it later when getting the result
-        # need to do this because when we sync below here, the client's next_batch token will
-        # be updated to the latest sync token, which will be after the result we're looking for
-
         result, next_batch = await run_room_message_filter(
             self.matrix_client,
             self.room,
             message_filter,
-            since=self.matrix_client.next_batch,
+            since="",  # we can simply search the full room history since we are filtering by a specific type
             direction=MessageDirection.back,
         )
         return result
@@ -147,6 +138,11 @@ class MatrixResultBackend(AsyncResultBackend):
         :returns: True if the result is ready else False.
         """
         result = await self._fetch_result_from_matrix(task_id)
+        if not result.get(self.room):
+            # invalidate the cache if the result is not found
+            # we dont want to cache an empty result as it may
+            # be a temporary condition (the result hasn't been pushed yet)
+            self._fetch_result_from_matrix.cache_invalidate(task_id)
         return True if result.get(self.room) else False
 
     async def get_result(
