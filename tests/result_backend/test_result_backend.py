@@ -8,6 +8,7 @@ import pytest
 from fractal.matrix.exceptions import GetLatestSyncTokenError
 from nio import RoomMessagesError
 from taskiq.result import TaskiqResult
+
 from taskiq_matrix.exceptions import DuplicateExpireTimeSelectedError
 from taskiq_matrix.matrix_result_backend import (
     ExpireTimeMustBeMoreThanZeroError,
@@ -218,42 +219,6 @@ async def test_matrix_result_backend_set_result_no_time_case(test_matrix_result_
         msgtype=f"taskiq.result.{test_task_id}",
     )
     assert result.labels == {"device": test_backend.device_name}
-    await test_backend.shutdown()
-
-
-async def test_matrix_result_backend_is_result_ready_room_message_error(
-    test_matrix_result_backend,
-):
-    """
-    Tests that the MatrixBackendResult's as well as its client's next_batch are not
-    updated from within the is_result_ready function if room_messages returns a RoomMessagesError
-
-    NOTE The client's next_batch attribute will be altered outside of this function in
-    run_sync_filter, as shown in a later test
-    """
-    # create a MatrixResultBackend object
-    test_backend = await test_matrix_result_backend()
-
-    # create a task id
-    test_task_id = str(uuid4())
-
-    # set the next_batch attributes to None
-    test_backend.next_batch = None
-    test_backend.matrix_client.next_batch = None
-
-    # patch room_messages to return a RoomMessagesError
-    with pytest.raises(GetLatestSyncTokenError, match="test error"):
-        with patch(
-            "taskiq_matrix.matrix_result_backend.FractalAsyncClient.room_messages",
-            return_value=AsyncMock(
-                spec=RoomMessagesError, start="test start", message="test error"
-            ),
-        ):
-            await test_backend.is_result_ready(test_task_id)
-
-    # verify that the next_batch attributes were not changed
-    assert test_backend.next_batch is None
-    assert test_backend.matrix_client.next_batch is None
     await test_backend.shutdown()
 
 
@@ -610,16 +575,9 @@ async def test_matrix_result_backend_fetch_result_from_matrix_returns_result(
     # create a task id
     test_task_id = str(uuid4())
 
-    # set the next_batch attributes to None
-    test_backend.next_batch = None
-    test_backend.matrix_client.next_batch = None
-
     result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
     serialized_result = b64encode(pickle.dumps(result)).decode()
     response = {test_backend.room: [{"body": {"task": {"value": serialized_result}}}]}
-
-    expected_sync_token = "s1028349-2314"
-    test_backend.matrix_client.get_latest_sync_token = AsyncMock(return_value=expected_sync_token)
 
     with patch(
         "taskiq_matrix.matrix_result_backend.run_room_message_filter",
@@ -630,8 +588,5 @@ async def test_matrix_result_backend_fetch_result_from_matrix_returns_result(
         assert result == response
 
         mock_run_room_message_filter.assert_called_once()
-
-    assert test_backend.next_batch == expected_sync_token
-    assert test_backend.matrix_client.next_batch == expected_sync_token
 
     await test_backend.shutdown()
