@@ -1,4 +1,4 @@
-FROM matrixdotorg/synapse:v1.95.1
+FROM matrixdotorg/synapse:v1.100.0
 
 ARG SYNAPSE_SERVER_NAME=localhost
 ARG SYNAPSE_REPORT_STATS=no
@@ -15,5 +15,9 @@ COPY config_to_add.yaml /config_to_add.yaml
 # append config to homeserver.yaml only if it's not already there
 RUN cat /config_to_add.yaml >> /data/homeserver.yaml
 
+# for some reason synapse is having permissions problems.
+# this is a workaround for now
+RUN chown -R 991:991 /data
+
 ENTRYPOINT bash -c ' \
-    python /start.py &> /dev/null'
+    python /start.py'
