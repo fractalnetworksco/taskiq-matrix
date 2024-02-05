@@ -243,8 +243,9 @@ class MatrixBroker(AsyncBroker):
         Shuts down the broker.
         """
         logger.info("Shutting down the broker")
-        self.checkpoint_updater.cancel()
-        await self.checkpoint_updater
+        if hasattr(self, "checkpoint_updater"):
+            self.checkpoint_updater.cancel()
+            await self.checkpoint_updater
 
         await self.device_queue.shutdown()
         await self.broadcast_queue.shutdown()
@@ -364,7 +365,7 @@ class MatrixBroker(AsyncBroker):
         )
         return await client.close()
 
-    async def get_tasks(self) -> AsyncGenerator[List[Task], Any]: # pragma: no cover
+    async def get_tasks(self) -> AsyncGenerator[List[Task], Any]:  # pragma: no cover
         while True:
             tasks = {
                 "device_queue": asyncio.create_task(
