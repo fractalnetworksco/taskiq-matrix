@@ -63,8 +63,8 @@ async def test_tasks_update_checkpoint_no_tasks(test_matrix_broker, new_matrix_r
     # create a MatrixBroker object from fixture
     broker = await test_matrix_broker()
 
-    os.environ['MATRIX_ROOM_ID'] = broker.room_id
-    with patch('taskiq_matrix.tasks.broker', broker):
+    os.environ["MATRIX_ROOM_ID"] = broker.room_id
+    with patch("taskiq_matrix.tasks.broker", broker):
         # patch the get_first_unacked_task function to verify it was not called
         with patch("taskiq_matrix.tasks.get_first_unacked_task") as mock_get_first_unacked:
             # patch the logger to verify its function calls
@@ -75,9 +75,9 @@ async def test_tasks_update_checkpoint_no_tasks(test_matrix_broker, new_matrix_r
         # verify that get_first_unacked_task was not called
         mock_get_first_unacked.assert_not_awaited()
 
-        # verify that logger.info was called twice and that logger.debug was called
+        # verify that logger.info was called once and that logger.debug was called
         # with the expected string
-        assert mock_logger.info.call_count == 2
+        assert mock_logger.info.call_count == 1
         mock_logger.debug.assert_called_once_with("Task update_checkpoint: No tasks found")
 
     assert result

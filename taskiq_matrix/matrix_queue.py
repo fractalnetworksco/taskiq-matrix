@@ -39,7 +39,7 @@ class TaskTypes:
         self.result = "taskiq.result"
         self.lock = f"{self.task}.lock"
 
-    def all(self) -> List[str]: # pragma: no cover
+    def all(self) -> List[str]:  # pragma: no cover
         """
         Returns the task types for the queue.
         """
@@ -148,7 +148,7 @@ class Checkpoint:
         # acquire lock on checkpoint
         try:
             async with MatrixLock(room_id=self.room_id).lock(key=self.type):
-                logger.debug(f"Setting checkpoint for type {self.type}")
+                logger.info(f"Got {self.type} lock. Setting checkpoint for type {self.type}")
                 # set checkpoint
                 resp = await self.client.room_put_state(
                     self.room_id,
@@ -160,6 +160,7 @@ class Checkpoint:
                     return False
                 else:
                     self.since_token = since_token
+                    logger.info(f"Successfully set checkpoint for type: {self.type}")
                     return True
 
         except LockAcquireError as e:
@@ -265,7 +266,7 @@ class MatrixQueue:
                 # to get new events from now on
                 self.client.next_batch = await self.client.get_latest_sync_token(self.room_id)
                 logger.info(
-                    f"Caught up - Updating checkpoint in room to: {self.client.next_batch}"
+                    f"Caught up - Attempting to update {self.checkpoint.type} checkpoint in room to: {self.client.next_batch}"
                 )
                 await self.checkpoint.put_checkpoint_state(self.client.next_batch)
                 return await self.get_tasks(timeout=timeout)

@@ -193,17 +193,31 @@ class MatrixBroker(AsyncBroker):
         """
         from .tasks import update_checkpoint
 
+        _caught_up = False
         try:
             while True:
+                # only update checkpoints if all queues are caught up
+                # FIXME: as queues are caught up, add them to the list of queues to update?
+                # right now, all queues must be up to date before the update_checkpoint task begins
+                if not _caught_up and all(
+                    [
+                        self.device_queue.caught_up,
+                        self.broadcast_queue.caught_up,
+                        self.replication_queue.caught_up,
+                    ]
+                ):
+                    _caught_up = True
+
                 try:
-                    # run both updates in parallel
-                    await asyncio.gather(
-                        update_checkpoint("device"),
-                        update_checkpoint("broadcast"),
-                        update_checkpoint("replication"),
-                    )
+                    if _caught_up:
+                        # run checkpoint updates in parallel
+                        await asyncio.gather(
+                            update_checkpoint("device"),
+                            update_checkpoint("broadcast"),
+                            update_checkpoint("replication"),
+                        )
                 except Exception as err:
-                    logger.error("Encountered error in update_device_checkpoint: %s", err)
+                    logger.error("Encountered error in update_device_checkpoint: %s", err.args)
 
                 await asyncio.sleep(interval)
         except asyncio.CancelledError:

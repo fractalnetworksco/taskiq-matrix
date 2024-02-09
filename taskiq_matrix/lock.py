@@ -129,19 +129,16 @@ class MatrixLock:
         try:
             lock = await self._acquire_lock(key)
             if not lock and wait is False:
+                await self.client.close()
                 raise LockAcquireError("Could not acquire lock on %s" % key)
         except Exception as err:
-            raise LockAcquireError(f"Error acquiring lock on {key}: {err}")
-        finally:
             await self.client.close()
+            raise LockAcquireError(f"Error acquiring lock on {key}: {err}")
 
         try:
             yield self.lock_id
         finally:
             logger.debug(f"Worker ({self.lock_id}) releasing lock: {key}")
-            # update sync token before we release
-            # await self.filter(self.create_filter(limit=0), timeout=0)
-            # self.next_batch = self.client.next_batch
             await self.send_message(
                 {"type": f"fn.lock.release.{key}"}, msgtype=f"fn.lock.release.{key}"
             )
@@ -166,16 +163,18 @@ class MatrixLock:
         # if last event is a lock release or the lock types dont exist in the room,
         # we can acquire the lock
         if self.room_id not in res or res[self.room_id][0]["type"] == f"fn.lock.release.{key}":
+            logger.debug(
+                f"Worker {self.lock_id} will attempt to acquire since Got back response for {key}: {res}"
+            )
             await self.send_message(
                 {"type": f"fn.lock.acquire.{key}", "lock_id": self.lock_id},
                 msgtype=f"fn.lock.acquire.{key}",
             )
 
             # filter again to make sure that we got the lock
-            # all mutex tasks from the beginning of room history will be returned, we should
-            # figure out a way to optomize this
             res, _ = await self.filter(self.create_filter(types=[f"fn.lock.acquire.{key}"]))
             if res[self.room_id] and res[self.room_id][0]["lock_id"] == self.lock_id:
+                logger.debug(f"Worker {self.lock_id} acquired lock {key}")
                 return True
             else:
                 logger.info(
@@ -203,6 +202,7 @@ class MatrixLock:
             since=self.next_batch,
             content_only=True,
             direction=message_direction,
+            limit=limit,
         )
         rooms = list(result.keys())
         d = {}

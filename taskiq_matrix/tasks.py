@@ -76,11 +76,8 @@ async def update_checkpoint(queue_name: str) -> bool:
         # TODO: ensure that this is the correct sync token to use
         new_checkpoint = queue.client.next_batch
 
-    # logger.info(f"Updating {queue.name}'s checkpoint to {new_checkpoint}")
     success = await queue.checkpoint.put_checkpoint_state(new_checkpoint)
-    if success:
-        logger.info(f"Updated checkpoint for queue: {queue.checkpoint.type}")
-    else:
+    if not success:
         raise Exception(f"Failed to update checkpoint {queue.checkpoint.type}.")
 
     return True
