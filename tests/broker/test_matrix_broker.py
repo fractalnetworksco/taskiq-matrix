@@ -15,7 +15,6 @@ from nio import (
     RoomPutStateResponse,
 )
 from taskiq.message import BrokerMessage
-
 from taskiq_matrix.exceptions import (
     DeviceQueueRequiresDeviceLabel,
     ScheduledTaskRequiresTaskIdLabel,
@@ -29,12 +28,13 @@ from taskiq_matrix.matrix_broker import (
 )
 from taskiq_matrix.matrix_queue import MatrixQueue
 
+
 async def test_matrix_broker_with_matrix_config():
     """
     Tests that with_matrix_config properly sets the attributes of the MatrixBroker object
     with the values passed to it.
     """
-    
+
     # create matrix config variables
     test_room_id = "test room id"
     test_homeserver_url = "test homeserver url"
@@ -43,7 +43,7 @@ async def test_matrix_broker_with_matrix_config():
     # create a MatrixBroker object
     test_broker = MatrixBroker()
 
-    # verify that the broker has a device name as a control 
+    # verify that the broker has a device name as a control
     assert hasattr(test_broker, "device_name")
     # verify that it doesn not have any matrix config attributes
     assert not hasattr(test_broker, "room_id")
@@ -57,6 +57,7 @@ async def test_matrix_broker_with_matrix_config():
     assert test_broker.room_id == test_room_id
     assert test_broker.homeserver_url == test_homeserver_url
     assert test_broker.access_token == test_access_token
+
 
 async def test_matrix_broker_with_result_backend_exception(test_matrix_broker):
     """
@@ -97,6 +98,7 @@ async def test_matrix_broker_with_result_backend_no_exception(test_matrix_broker
 
     assert broker_with_backend.result_backend == test_result_backend
 
+
 async def test_matrix_broker_init_queues_no_matrix_variables_side_effect():
     """
     Tests that an exception is raised if there are no matrix config variables
@@ -111,9 +113,9 @@ async def test_matrix_broker_init_queues_no_matrix_variables_side_effect():
     with pytest.raises(Exception, match="Matrix config must be set with with_matrix_config."):
         test_broker._init_queues()
 
+
 async def test_matrix_broker_init_queues_no_existing_queues():
-    """
-    """
+    """ """
 
     # create matrix config variables
     test_room_id = "test room id"
@@ -140,6 +142,7 @@ async def test_matrix_broker_init_queues_no_existing_queues():
     assert hasattr(test_broker, "broadcast_queue")
     assert hasattr(test_broker, "replication_queue")
 
+
 async def test_matrix_broker_init_queues_existing_queues(test_matrix_broker):
     """
     Tests that constructors are not called for the broker's queues if there are
@@ -163,6 +166,7 @@ async def test_matrix_broker_init_queues_existing_queues(test_matrix_broker):
         # verify that the constructors weren't called
         mock_queue.assert_not_called()
 
+
 async def test_matrix_broker_with_result_backend_not_instance(test_matrix_broker):
     """
     Tests that an exception is raised if an object is passed to with_result_backend
@@ -180,6 +184,7 @@ async def test_matrix_broker_with_result_backend_not_instance(test_matrix_broker
     ):
         test_broker.with_result_backend(mock_backend)
 
+
 async def test_matrix_broker_with_result_backend_is_instance(test_matrix_broker):
     """
     Tests that if a MatrixResultBackend object is passed to with_result_backend, the
@@ -192,10 +197,11 @@ async def test_matrix_broker_with_result_backend_is_instance(test_matrix_broker)
     # mock a MatrixResultBackend object
     mock_backend = MagicMock(spec=MatrixResultBackend)
 
-    # call with_result_backend and verify that the object returned has a 
+    # call with_result_backend and verify that the object returned has a
     # result_backend attribute matching the mocked MatrixResultBackend object
     result = test_broker.with_result_backend(mock_backend)
     assert result.result_backend == mock_backend
+
 
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_unknown_error(test_matrix_broker):
@@ -221,6 +227,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_unknown_error(test_matrix
     with pytest.raises(Exception):
         await broker.add_mutex_checkpoint_task()
 
+
 async def test_matrix_broker_add_mutex_checkpoint_task_state_not_found(test_matrix_broker):
     """
     Tests exception raised if room get state event in the mutex queue
@@ -243,6 +250,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_state_not_found(test_matr
     with patch("taskiq_matrix.matrix_broker.logger", new=MagicMock()) as mock_logger:
         await broker.add_mutex_checkpoint_task()
         mock_logger.info.assert_called_once()
+
 
 async def test_matrix_broker_add_mutex_checkpoint_task_content_errcode(test_matrix_broker):
     """
@@ -269,6 +277,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_content_errcode(test_matr
     # call add_mutex_checkpoint_task to raise an exception caused by the "errcode" key
     with pytest.raises(Exception):
         await broker.add_mutex_checkpoint_task()
+
 
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_checkpoint_exists(test_matrix_broker):
@@ -310,6 +319,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_checkpoint_exists(test_ma
 
         mock_room_put_state.assert_not_called()
 
+
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_update_schedule(test_matrix_broker):
     """
@@ -328,13 +338,14 @@ async def test_matrix_broker_add_mutex_checkpoint_task_update_schedule(test_matr
         "taskiq.schedules",
     )
     assert isinstance(res, RoomGetStateEventResponse)
-    assert len(res.content["tasks"]) == 1 
+    assert len(res.content["tasks"]) == 1
     assert res.content["tasks"][0]["name"] == "taskiq.update_checkpoint"
     assert res.content["tasks"][0]["cron"] == "* * * * *"
     assert res.content["tasks"][0]["labels"]["task_id"] == "mutex_checkpoint"
     assert res.content["tasks"][0]["labels"]["queue"] == "mutex"
     assert res.content["tasks"][0]["args"] == ["mutex"]
     assert res.content["tasks"][0]["kwargs"] == {}
+
 
 @pytest.mark.integtest
 async def test_matrix_broker_add_mutex_checkpoint_task_put_state_error(test_matrix_broker):
@@ -363,6 +374,7 @@ async def test_matrix_broker_add_mutex_checkpoint_task_put_state_error(test_matr
 
         assert not result
         mock_room_put_state.assert_called_once()
+
 
 async def test_matrix_broker_add_mutex_checkpoint_task_lock_fail(test_matrix_broker):
     """
@@ -457,6 +469,7 @@ async def test_matrix_broker_shutdown_proper_shutdown(test_matrix_broker):
     matrix_broker.broadcast_queue.client.close.assert_called_once()
     matrix_broker.mutex_queue.client.close.assert_called_once()
     matrix_broker.replication_queue.client.close.assert_called_once()
+
 
 async def test_matrix_broker_use_task_id(test_matrix_broker):
     """
@@ -571,13 +584,14 @@ async def test_matrix_broker_kick_functional_test(test_matrix_broker, test_broke
                 # send_message was called with the appropriate information
                 mock_lock.assert_not_called()
                 mock_send_message.assert_called_with(
-                    mock_client, #type:ignore
+                    mock_client,  # type:ignore
                     matrix_broker.mutex_queue.room_id,
                     test_broker_message.message,
                     msgtype=matrix_broker.mutex_queue.task_types.task,
                     task_id=test_broker_message.task_id,
                     queue=matrix_broker.mutex_queue.name,
                 )
+
 
 @pytest.mark.integtest
 async def test_matrix_broker_kick_no_task_id(test_matrix_broker, test_broker_message):
@@ -598,6 +612,7 @@ async def test_matrix_broker_kick_no_task_id(test_matrix_broker, test_broker_mes
         with pytest.raises(ScheduledTaskRequiresTaskIdLabel):
             async_gen = await matrix_broker.kick(test_broker_message)
             mock_lock.assert_not_called()
+
 
 async def test_matrix_broker_kick_lock_success(test_matrix_broker, test_broker_message):
     """
@@ -648,6 +663,7 @@ async def test_matrix_broker_kick_lock_success(test_matrix_broker, test_broker_m
                     task_id=comparison_task_id,
                     queue=matrix_broker.mutex_queue.name,
                 )
+
 
 async def test_matrix_broker_kick_lock_fail(test_matrix_broker, test_broker_message):
     """
@@ -771,6 +787,7 @@ async def test_matrix_broker_kick_device_queue_raises_exception_if_no_device_lab
     await laptop_queue.shutdown()
     await desktop_queue.shutdown()
 
+
 async def test_matrix_broker_kick_device_queue_valid_device_label(
     test_matrix_broker: Callable[[], Awaitable[MatrixBroker]],
     test_broker_message: BrokerMessage,
@@ -781,10 +798,7 @@ async def test_matrix_broker_kick_device_queue_valid_device_label(
     """
     broker = await test_matrix_broker()
 
-    test_broker_message.labels = {
-        "queue": "device",
-        "device": "test device"
-    }
+    test_broker_message.labels = {"queue": "device", "device": "test device"}
     msgtype = broker.device_queue.task_types.device_task(test_broker_message.labels["device"])
 
     test_client = FractalAsyncClient(
@@ -792,11 +806,9 @@ async def test_matrix_broker_kick_device_queue_valid_device_label(
         access_token=os.environ["MATRIX_ACCESS_TOKEN"],
     )
 
-    # kick task 
-    with patch('taskiq_matrix.matrix_broker.send_message', new=AsyncMock()) as mock_send_message:
-        with patch(
-            "taskiq_matrix.matrix_broker.FractalAsyncClient", return_value=test_client
-        ):
+    # kick task
+    with patch("taskiq_matrix.matrix_broker.send_message", new=AsyncMock()) as mock_send_message:
+        with patch("taskiq_matrix.matrix_broker.FractalAsyncClient", return_value=test_client):
             await broker.kick(test_broker_message)
 
     # verify the message sent
@@ -806,49 +818,9 @@ async def test_matrix_broker_kick_device_queue_valid_device_label(
         test_broker_message.message,
         msgtype=msgtype,
         task_id=test_broker_message.task_id,
-        queue='device'
+        queue="device",
     )
 
-async def test_matrix_broker_listen_no_tasks(test_iterable_tasks, test_matrix_broker):
-    """
-    Tests that if there are no unacked tasks, the queue's checkpoint since token is
-    updated to the client's next_batch value.
-    """
-
-    # create a matrix broker object
-    broker = await test_matrix_broker()
-
-    # store the next_batches of the queue's clients for comparison
-    test_device_since = broker.device_queue.client.next_batch
-    test_broadcast_since = broker.broadcast_queue.client.next_batch
-    test_mutex_since = broker.mutex_queue.client.next_batch
-    test_replication_since = broker.replication_queue.client.next_batch
-
-    # create an iterable of 0 tasks
-    tasks_iterator = test_iterable_tasks(0)
-    tasks = []
-
-    # patch get_tasks to return the iterable that was created locally
-    with patch('taskiq_matrix.matrix_broker.MatrixBroker.get_tasks', return_value=tasks_iterator):
-        with patch('taskiq_matrix.matrix_broker.logger') as mock_logger:
-            # call the function and store the yielded tasks
-            async def listen_wrapper():
-                async for task in broker.listen():
-                    tasks.append(task)
-                
-            await listen_wrapper()
-            
-    # verify that the list of tasks is empty
-    assert tasks == []
-
-    # verify the logger.debug call was only made once
-    mock_logger.debug.assert_called_once()
-
-    # verify that the checkpoint since tokens match what is expected
-    assert broker.device_queue.checkpoint.since_token == test_device_since
-    assert broker.broadcast_queue.checkpoint.since_token == test_broadcast_since
-    assert broker.mutex_queue.checkpoint.since_token == test_mutex_since
-    assert broker.replication_queue.checkpoint.since_token == test_replication_since
 
 async def test_matrix_broker_listen_tasks_present(test_iterable_tasks, test_matrix_broker):
     """
@@ -862,19 +834,20 @@ async def test_matrix_broker_listen_tasks_present(test_iterable_tasks, test_matr
     num_tasks = 5
     tasks_iterator = test_iterable_tasks(num_tasks)
     tasks = []
-        
+
     # patch get_tasks to return the iterable that was created locally
-    with patch('taskiq_matrix.matrix_broker.MatrixBroker.get_tasks', return_value=tasks_iterator):
+    with patch("taskiq_matrix.matrix_broker.MatrixBroker.get_tasks", return_value=tasks_iterator):
         # call the function and store the yielded tasks
         async def listen_wrapper():
             async for task in broker.listen():
                 tasks.append(task)
-            
+
         await listen_wrapper()
-            
+
     # verify that the number of tasks received is the same as the number of tasks that
     # were in the broker
     assert len(tasks) == num_tasks
+
 
 async def test_matrix_broker_listen_lock_error(test_iterable_tasks, test_matrix_broker):
     """
@@ -892,19 +865,21 @@ async def test_matrix_broker_listen_lock_error(test_iterable_tasks, test_matrix_
 
     # set yield_task to raise a LockAcquireError
     broker.mutex_queue.yield_task = AsyncMock(side_effect=LockAcquireError())
-        
+
     # patch get_tasks to return the iterable that was created locally
-    with patch('taskiq_matrix.matrix_broker.MatrixBroker.get_tasks', return_value=tasks_iterator):
-        with patch('taskiq_matrix.matrix_broker.logger') as mock_logger:
+    with patch("taskiq_matrix.matrix_broker.MatrixBroker.get_tasks", return_value=tasks_iterator):
+        with patch("taskiq_matrix.matrix_broker.logger") as mock_logger:
+
             async def listen_wrapper():
                 async for task in broker.listen():
                     tasks.append(task)
-                    
+
             await listen_wrapper()
 
     # verify that logger.error was called and the number of tasks are the same
     call_count = mock_logger.error.call_count
     assert call_count == num_tasks
+
 
 async def test_matrix_broker_listen_yield_error(test_iterable_tasks, test_matrix_broker):
     """
@@ -921,17 +896,17 @@ async def test_matrix_broker_listen_yield_error(test_iterable_tasks, test_matrix
 
     # set yield_task to raise an Exception
     broker.mutex_queue.yield_task = AsyncMock(side_effect=Exception())
-        
+
     # patch get_tasks to return the iterable that was created locally
-    with patch('taskiq_matrix.matrix_broker.MatrixBroker.get_tasks', return_value=tasks_iterator):
-        with patch('taskiq_matrix.matrix_broker.logger') as mock_logger:
+    with patch("taskiq_matrix.matrix_broker.MatrixBroker.get_tasks", return_value=tasks_iterator):
+        with patch("taskiq_matrix.matrix_broker.logger") as mock_logger:
+
             async def listen_wrapper():
                 async for task in broker.listen():
                     tasks.append(task)
-                    
+
             await listen_wrapper()
 
     # verify that logger.error was called and the number of tasks are the same
     call_count = mock_logger.error.call_count
     assert call_count == num_tasks
-

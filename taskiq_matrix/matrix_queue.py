@@ -147,7 +147,11 @@ class Checkpoint:
         """
         # acquire lock on checkpoint
         try:
-            async with MatrixLock(room_id=self.room_id).lock(key=self.type):
+            async with MatrixLock(
+                room_id=self.room_id,
+                homeserver_url=self.client.homeserver,
+                access_token=self.client.access_token,
+            ).lock(key=self.type):
                 logger.info(f"Got {self.type} lock. Setting checkpoint for type {self.type}")
                 # set checkpoint
                 resp = await self.client.room_put_state(
@@ -304,7 +308,10 @@ class MatrixQueue:
         unacked = []
         for task in task_dict.values():
             if not task.acknowledged:
-                # if exclude_self is False, then append any unacked task
+                # if exclude_self is False, then append unacked task
+                print(
+                    f"FOUND A TASK: {task.id} Sender: {task.sender} IAM: {self.client.user_id}, I will exclude myself: {exclude_self}"
+                )
                 if not exclude_self:
                     unacked.append(task)
                 # if exclude_self is True, then filter out tasks that were sent by us
@@ -344,6 +351,11 @@ class MatrixQueue:
         unacked = self.filter_acked_tasks(tasks, exclude_self=exclude_self)
         if not unacked:
             logger.debug(f"No unacked tasks found for queue: {self.name}")
+            self.client.next_batch = await self.client.get_latest_sync_token(self.room_id)
+            logger.info(
+                f"No unacked tasks, updating {self.checkpoint.type} checkpoint in room to: {self.client.next_batch}"
+            )
+            await self.checkpoint.put_checkpoint_state(self.client.next_batch)
 
         return self.name, unacked
 
@@ -442,7 +454,11 @@ class MatrixQueue:
         if not lock:
             return await _yield_task()
 
-        async with MatrixLock(room_id=self.room_id).lock(f"{self.task_types.lock}.{task.id}"):
+        async with MatrixLock(
+            room_id=self.room_id,
+            homeserver_url=self.client.homeserver,
+            access_token=self.client.access_token,
+        ).lock(f"{self.task_types.lock}.{task.id}"):
             return await _yield_task()
 
     async def shutdown(self) -> None:

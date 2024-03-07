@@ -4,14 +4,13 @@ import os
 from typing import Any, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
-from fractal.matrix import FractalAsyncClient
 
 import pytest
 import pytest_asyncio
+from fractal.matrix import FractalAsyncClient
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
-
 from taskiq_matrix.matrix_broker import MatrixBroker
 from taskiq_matrix.matrix_queue import Checkpoint, Task
 from taskiq_matrix.matrix_result_backend import MatrixResultBackend
@@ -126,11 +125,13 @@ def test_broker_message():
     # create the BrokerMessage object
     return BrokerMessage(task_id=task_id, task_name="test_name", message=message_bytes, labels={})
 
+
 @pytest.fixture
 def test_multiple_broker_message():
     """
     Create a BrokerMessage Fixture
     """
+
     async def create(num_messages: int):
         messages = []
         for i in range(num_messages):
@@ -146,19 +147,28 @@ def test_multiple_broker_message():
             # encode the message into message bytes
             message_bytes = message_string.encode("utf-8")
 
-            messages.append(BrokerMessage(task_id=task_id, task_name="test_name", message=message_bytes, labels={}))
+            messages.append(
+                BrokerMessage(
+                    task_id=task_id, task_name="test_name", message=message_bytes, labels={}
+                )
+            )
 
         # create the BrokerMessage object
         return messages
+
     return create
+
 
 @pytest.fixture(scope="function")
 def test_checkpoint(test_room_id):
     mock_client_parameter = MagicMock(spec=FractalAsyncClient)
+    mock_client_parameter.homeserver = TEST_HOMESERVER_URL
+    mock_client_parameter.access_token = TEST_USER_ACCESS_TOKEN
     mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
         content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
     )
     return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
+
 
 @pytest.fixture
 def test_room_id() -> str:

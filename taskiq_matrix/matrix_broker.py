@@ -412,9 +412,16 @@ class MatrixBroker(AsyncBroker):
                         logger.error(f"Sync failed: {e}")
 
                     # Reschedule a new task for the completed queue
-                    tasks[queue_name] = asyncio.create_task(
-                        getattr(self, queue_name).get_unacked_tasks(), name=queue_name
-                    )
+                    if queue_name == "replication_queue":
+                        logger.info("Rescheduling replication_queue task")
+                        tasks[queue_name] = asyncio.create_task(
+                            getattr(self, queue_name).get_unacked_tasks(exclude_self=True),
+                            name=queue_name,
+                        )
+                    else:
+                        tasks[queue_name] = asyncio.create_task(
+                            getattr(self, queue_name).get_unacked_tasks(), name=queue_name
+                        )
 
                 if sync_task_results:
                     yield list(itertools.chain.from_iterable(sync_task_results))
@@ -433,27 +440,6 @@ class MatrixBroker(AsyncBroker):
         :yields: broker messages.
         """
         async for tasks in self.get_tasks():
-            if not tasks:
-                logger.debug(f"No tasks found for room: {self.room_id}")
-
-                # Using the next batch from the client since the current checkpoint
-                # is likely returning tasks that all have acks. Since the checkpoint
-                # is returning task events that proceed its sync token, the
-                # timeout is not respected. This can result in rapid fire
-                # requests to the Matrix server. To avoid this, the next batch
-                # token on the matrix client will allow catching new messages
-                # that come in while still respecting the matrix client's timeout.
-                # Doing so helps avoid rapid fire requests.
-                self.device_queue.checkpoint.since_token = self.device_queue.client.next_batch
-                self.broadcast_queue.checkpoint.since_token = (
-                    self.broadcast_queue.client.next_batch
-                )
-                self.mutex_queue.checkpoint.since_token = self.mutex_queue.client.next_batch
-                self.replication_queue.checkpoint.since_token = (
-                    self.replication_queue.client.next_batch
-                )
-                continue
-
             for task in tasks:
                 queue_name = task.queue
                 queue: MatrixQueue = getattr(self, f"{queue_name}_queue")
