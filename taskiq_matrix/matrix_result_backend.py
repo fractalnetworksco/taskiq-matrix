@@ -4,11 +4,9 @@ import pickle
 import socket
 from base64 import b64decode, b64encode
 from typing import Any, Dict, Optional, TypeVar, Union
-from uuid import uuid4
 
 from async_lru import alru_cache
 from fractal.matrix.async_client import FractalAsyncClient
-from nio import MessageDirection, RoomMessagesError
 from taskiq import AsyncResultBackend
 from taskiq.result import TaskiqResult
 
@@ -17,7 +15,7 @@ from .exceptions import (
     ExpireTimeMustBeMoreThanZeroError,
     ResultDecodeError,
 )
-from .filters import create_room_message_filter, run_room_message_filter
+from .filters import create_sync_filter, run_sync_filter
 from .utils import send_message
 
 _ReturnType = TypeVar("_ReturnType")
@@ -31,7 +29,6 @@ class MatrixResultBackend(AsyncResultBackend):
         self,
         homeserver_url: str,
         access_token: str,
-        room_id: str,
         result_ex_time: Optional[int] = None,
         result_px_time: Optional[int] = None,
     ):
@@ -41,13 +38,11 @@ class MatrixResultBackend(AsyncResultBackend):
         :param result_ex_time: expire time in seconds for result.
         :param result_px_time: expire time in milliseconds for result.
         """
-        self.room = room_id
         self.homeserver_url = homeserver_url
         self.access_token = access_token
         self.matrix_client = FractalAsyncClient(
             homeserver_url=homeserver_url,
             access_token=access_token,
-            room_id=self.room,
         )
         self.result_ex_time = result_ex_time
         self.result_px_time = result_px_time
@@ -91,6 +86,15 @@ class MatrixResultBackend(AsyncResultBackend):
         # ensure that the device name is set in labels for the result
         result.labels.update({"device": self.device_name})
 
+        import pdb
+
+        pdb.set_trace()
+
+        try:
+            room_id = result.labels["room_id"]
+        except KeyError:
+            raise KeyError("room_id is not set in the labels of the result")
+
         message: Dict[str, Union[str, bytes, int]] = {
             "name": task_id,
             # FIXME: Move away from pickling due to security concerns
@@ -104,7 +108,7 @@ class MatrixResultBackend(AsyncResultBackend):
 
         await send_message(
             self.matrix_client,
-            self.room,
+            room_id,
             message,
             msgtype=f"taskiq.result.{task_id}",
         )
@@ -119,13 +123,14 @@ class MatrixResultBackend(AsyncResultBackend):
         :param task_id: ID of the task.
         :return: list of task results.
         """
-        message_filter = create_room_message_filter(self.room, types=[f"taskiq.result.{task_id}"])
-        result, next_batch = await run_room_message_filter(
+        # FIXME: May need to use client.joined_rooms()
+        # then iterate through them and use room_messages.
+        sync_filter = create_sync_filter(types=[f"taskiq.result.{task_id}"])
+        result = await run_sync_filter(
             self.matrix_client,
-            self.room,
-            message_filter,
-            since="",  # we can simply search the full room history since we are filtering by a specific type
-            direction=MessageDirection.back,
+            sync_filter,
+            timeout=0,
+            since=None,
         )
         return result
 
@@ -138,12 +143,13 @@ class MatrixResultBackend(AsyncResultBackend):
         :returns: True if the result is ready else False.
         """
         result = await self._fetch_result_from_matrix(task_id)
-        if not result.get(self.room):
+        if not result:
             # invalidate the cache if the result is not found
             # we dont want to cache an empty result as it may
             # be a temporary condition (the result hasn't been pushed yet)
             self._fetch_result_from_matrix.cache_invalidate(task_id)
-        return True if result.get(self.room) else False
+            return False
+        return True
 
     async def get_result(
         self,
@@ -163,7 +169,9 @@ class MatrixResultBackend(AsyncResultBackend):
         result_object = await self._fetch_result_from_matrix(task_id)
 
         try:
-            result = result_object[self.room][0]
+            # the result should be a dict with a single key, the room id
+            room_id = list(result_object.keys())[0]
+            result = result_object[room_id][0]
         except Exception as e:
             logger.error(f"Error getting task result from Matrix {e}")
             raise ResultDecodeError()

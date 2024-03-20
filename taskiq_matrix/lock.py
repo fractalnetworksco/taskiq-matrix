@@ -199,7 +199,7 @@ class MatrixLock:
             self.client,
             self.room_id,
             filter,
-            since=self.next_batch,
+            start=self.next_batch or "",
             content_only=True,
             direction=message_direction,
             limit=limit,

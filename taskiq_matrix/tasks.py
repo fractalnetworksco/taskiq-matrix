@@ -26,7 +26,7 @@ async def update_checkpoint(queue_name: str) -> bool:
     Returns:
         True if checkpoint was successfully updated, False otherwise.
     """
-    broker._init_queues()
+    await broker._init_queues()
     try:
         queue: MatrixQueue = getattr(broker, f"{queue_name}_queue")
     except AttributeError:

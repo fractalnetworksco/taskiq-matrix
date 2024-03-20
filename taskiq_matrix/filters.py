@@ -2,11 +2,18 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 from uuid import uuid4
 
-if TYPE_CHECKING: # pragma: no cover
+if TYPE_CHECKING:  # pragma: no cover
     from taskiq_matrix.matrix_queue import TaskTypes
 
 from fractal.matrix.async_client import FractalAsyncClient
-from nio import BadEvent, Event, MessageDirection, RoomMessagesError, SyncError
+from nio import (
+    BadEvent,
+    Event,
+    MessageDirection,
+    RoomMessagesError,
+    SyncError,
+    Timeline,
+)
 
 EMPTY_FILTER: Dict[str, Union[Dict[str, Any], str]] = {
     "presence": {"limit": 0, "types": []},
@@ -40,7 +47,7 @@ INVITE_FILTER = {
 
 
 def create_filter(
-    room_id: str,
+    room_id: Optional[str] = None,
     types: list = [],
     not_types: list = [],
     limit: Optional[int] = None,
@@ -57,7 +64,6 @@ def create_filter(
         "presence": {"limit": 0, "types": []},
         "account_data": {"limit": 0, "types": []},
         "room": {
-            "rooms": [room_id],
             "state": {"types": [], "limit": 0},
             "timeline": {
                 "types": [*types],
@@ -67,6 +73,9 @@ def create_filter(
         },
         "request_id": str(uuid4()),
     }
+    if room_id is not None:
+        message_filter["room"]["rooms"] = [room_id]
+
     if limit is not None:
         message_filter["room"]["timeline"]["limit"] = limit
 
@@ -79,7 +88,7 @@ def create_filter(
 
 
 def create_sync_filter(
-    room_id: str,
+    room_id: Optional[str] = None,
     types: list = [],
     not_types: list = [],
     limit: Optional[int] = None,
@@ -89,7 +98,7 @@ def create_sync_filter(
     Creates a filter that works with the sync endpoint.
     """
     return create_filter(
-        room_id, types=types, not_types=not_types, limit=limit, not_senders=not_senders
+        room_id=room_id, types=types, not_types=not_types, limit=limit, not_senders=not_senders
     )
 
 
@@ -104,7 +113,7 @@ def create_room_message_filter(
     Creates a filter that works with the room_messages endpoint.
     """
     return create_filter(
-        room_id,
+        room_id=room_id,
         types=types,
         not_types=not_types,
         limit=limit,
@@ -113,7 +122,7 @@ def create_room_message_filter(
     )
 
 
-def _get_content_only(event: Union[Event, BadEvent]):
+def get_content_only(event: Union[Event, BadEvent]):
     content = event.source["content"]
     content["sender"] = event.sender
     content["event_id"] = event.event_id
@@ -143,9 +152,34 @@ async def run_sync_filter(
     d = {}
     for room in rooms:
         if content_only:
-            d[room] = [_get_content_only(event) for event in res.rooms.join[room].timeline.events]
+            d[room] = [get_content_only(event) for event in res.rooms.join[room].timeline.events]
         else:
             d[room] = [event.source for event in res.rooms.join[room].timeline.events]
+
+    return d
+
+
+async def sync_room_timelines(
+    client: FractalAsyncClient,
+    filter: dict,
+    timeout: int = 30000,
+    since: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Timeline]:
+    """
+    Execute a filter with the provided client.
+    """
+    if since is None:
+        client.next_batch = None  # type:ignore
+
+    res = await client.sync(timeout=timeout, sync_filter=filter, since=since)
+    if isinstance(res, SyncError):
+        raise Exception(res.message)
+
+    rooms = list(res.rooms.join.keys())
+    d = {}
+    for room in rooms:
+        d[room] = res.rooms.join[room].timeline
 
     return d
 
@@ -154,7 +188,8 @@ async def run_room_message_filter(
     client: FractalAsyncClient,
     room_id: str,
     filter: dict,
-    since: Optional[str] = None,
+    start: str = "",
+    end: Optional[str] = None,
     content_only: bool = True,
     direction: MessageDirection = MessageDirection.front,
     limit: int = 100,
@@ -162,11 +197,9 @@ async def run_room_message_filter(
     """
     Execute a room message request with the provided client attempts to deserialize json
     """
-    since = since or ""
+    since = start
 
-    end = None
-
-    if direction == MessageDirection.back:
+    if end is None and direction == MessageDirection.back:
         end = ""
 
     res = await client.room_messages(
@@ -183,7 +216,7 @@ async def run_room_message_filter(
     d = {}
     if res.chunk:
         if content_only:
-            d[room_id] = [_get_content_only(event) for event in res.chunk]
+            d[room_id] = [get_content_only(event) for event in res.chunk]
         else:
             d[room_id] = [event.source for event in res.chunk]
 
@@ -191,6 +224,7 @@ async def run_room_message_filter(
         return d, res.start
     else:
         return d, res.end
+
 
 async def get_first_unacked_task(
     tasks: list[Dict[str, Any]], task_types: "TaskTypes"

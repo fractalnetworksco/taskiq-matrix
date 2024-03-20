@@ -19,8 +19,10 @@ from .exceptions import CheckpointGetOrInitError, LockAcquireError, TaskAlreadyA
 from .filters import (
     create_room_message_filter,
     create_sync_filter,
+    get_content_only,
     run_room_message_filter,
     run_sync_filter,
+    sync_room_timelines,
 )
 from .lock import MatrixLock
 from .utils import send_message
@@ -58,6 +60,7 @@ class Task:
     data: str
     queue: str
     sender: str
+    room_id: str
 
     def __init__(self, *args, **event):
         # FIXME: if event is malformed this will fail resulting in
@@ -67,6 +70,7 @@ class Task:
         self.data = json.loads(event["body"]["task"])
         self.queue = event["body"]["queue"]
         self.sender = event["sender"]
+        self.room_id = event["room_id"]
 
     def __repr__(
         self,
@@ -171,6 +175,14 @@ class Checkpoint:
             logger.info(f"Failed to set checkpoint: {e}\n")
             return False
 
+    async def update_checkpoint(self, new_checkpoint: str) -> str:
+        """
+        Updates the current checkpoint on the Matrix server.
+        """
+        # update the checkpoint state in the configured Matrix room
+        await self.put_checkpoint_state(new_checkpoint)
+        return new_checkpoint
+
     @classmethod
     async def create(cls, type: str, client: FractalAsyncClient, room_id: str) -> "Checkpoint":
         """
@@ -188,7 +200,6 @@ class MatrixQueue:
     """
 
     name: str
-    room_id: str
     client: FractalAsyncClient
     checkpoint: Checkpoint
     task_types: TaskTypes
@@ -198,36 +209,21 @@ class MatrixQueue:
         name: str,
         homeserver_url: str,
         access_token: str,
-        room_id: str,
+        checkpoint_room_id: str,
         device_name: str = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname()),
     ):
-        self.client = FractalAsyncClient(
-            homeserver_url=homeserver_url, access_token=access_token, room_id=room_id
-        )
+        self.client = FractalAsyncClient(homeserver_url=homeserver_url, access_token=access_token)
         self.name = name
-        self.checkpoint = Checkpoint(type=name, client=self.client, room_id=room_id)
+        self.checkpoint = Checkpoint(type=name, client=self.client, room_id=checkpoint_room_id)
         self.task_types = TaskTypes(name)
         self.device_name = device_name
-        self.room_id = room_id
-        # Boolean that determines whether the queue is caught up with the room's timeline
-        # This is used to determine whether to use the room_messages API or the sync API
-        self.caught_up = False
-
-    async def verify_room_exists(self) -> None:
-        """
-        Verifies that the configured room exists
-        """
-        # verify room exists by fetching a piece of its room state
-        res = await self.client.room_get_state_event(self.room_id, "m.room.create")
-        if isinstance(res, RoomGetStateEventError):
-            raise Exception(f"Matrix room {self.room_id} not found: {res.message}")
 
     async def get_tasks(
         self,
         timeout: int = 30000,
         since_token: Optional[str] = None,
         task_filter: Optional[Dict[str, Any]] = None,
-    ) -> list[Task]:
+    ) -> Tuple[list[Task], str]:
         """
         Returns a list of tasks and acks.
 
@@ -240,48 +236,67 @@ class MatrixQueue:
                                 queue.
 
         Returns:
-            A list of tasks and acks.
+            Tuple[list[Task], next_batch returned from sync request]
         """
-        next_batch = since_token or self.checkpoint.since_token
+        next_batch = since_token or self.checkpoint.since_token or ""
 
         if not task_filter:
-            if self.caught_up:
-                task_filter = create_sync_filter(
-                    self.room_id,
-                    types=[self.task_types.task, f"{self.task_types.ack}.*"],
-                )
-            else:
+            task_filter = create_sync_filter(
+                types=[self.task_types.task, f"{self.task_types.ack}.*"],
+            )
+
+        # fetch all room timelines filtered by the task filter
+        room_timelines = await sync_room_timelines(
+            self.client, task_filter, timeout=timeout, since=next_batch
+        )
+
+        tasks = []
+        for room_id, timeline in room_timelines.items():
+            events = timeline.events
+            if not events:
+                # shouldn't be possible to get here since the room wouldn't be
+                # returned in the sync response, but if somehow this does occur, then continue
+                continue
+
+            if timeline.limited:
+                # if the timeline is limited, then we need to fetch the rest of the events
+                # that have happened in this room since the checkpoint
+                # the prev_batch on the timeline is where to fetch events up to
+                prev_batch = timeline.prev_batch
+
+                # use room_messages to fetch the rest of the events that have happened since the checkpoint
                 task_filter = create_room_message_filter(
-                    self.room_id,
-                    types=[self.task_types.task, f"{self.task_types.ack}.*"],
+                    room_id, types=[self.task_types.task, f"{self.task_types.ack}.*"]
+                )
+                task_events, more_messages = await run_room_message_filter(
+                    self.client, room_id, task_filter, start=next_batch, end=prev_batch
                 )
 
-        if self.caught_up:
-            task_events = await run_sync_filter(
-                self.client, task_filter, timeout=timeout, since=next_batch
-            )
-        else:
-            task_events, end = await run_room_message_filter(
-                self.client, self.room_id, task_filter, since=next_batch
-            )
-            if not end:
-                self.caught_up = True
-                # finished processing all events in the room, so use the sync API
-                # to get new events from now on
-                self.client.next_batch = await self.client.get_latest_sync_token(self.room_id)
-                logger.info(
-                    f"Caught up - Attempting to update {self.checkpoint.type} checkpoint in room to: {self.client.next_batch}"
-                )
-                await self.checkpoint.put_checkpoint_state(self.client.next_batch)
-                return await self.get_tasks(timeout=timeout)
-            else:
-                logger.info(f"Still catching up - Updating checkpoint to {end}")
-                self.checkpoint.since_token = end
+                # prepend the events to the list of events since these events are older
+                events = task_events.get(room_id, []) + events
 
-        # acks should be a separate type
-        # tasks should only be tasks
-        tasks = [Task(**task) for task in task_events.get(self.room_id, [])]
-        return tasks
+                # if there are still more events to fetch, then keep fetching
+                # until all the events have been fetched
+                while more_messages:
+                    task_events, more_messages = await run_room_message_filter(
+                        self.client,
+                        room_id,
+                        task_filter,
+                        start=more_messages,
+                        end=prev_batch,
+                    )
+                    events = task_events.get(room_id, []) + events
+
+            # create tasks from the list of events
+            tasks.extend([Task(room_id=room_id, **get_content_only(event)) for event in events])
+
+        if tasks:
+            # if tasks were returned, then reset the next_batch to the previous next batch so that we dont skip
+            # any tasks if some error occurs. We want to keep fetching the same tasks until they are all acked
+            # and only then should we update the next batch (checkpoint)
+            self.client.next_batch = next_batch
+
+        return tasks, self.client.next_batch
 
     def filter_acked_tasks(self, tasks: list["Task"], exclude_self: bool = False) -> list["Task"]:
         """
@@ -309,9 +324,6 @@ class MatrixQueue:
         for task in task_dict.values():
             if not task.acknowledged:
                 # if exclude_self is False, then append unacked task
-                print(
-                    f"FOUND A TASK: {task.id} Sender: {task.sender} IAM: {self.client.user_id}, I will exclude myself: {exclude_self}"
-                )
                 if not exclude_self:
                     unacked.append(task)
                 # if exclude_self is True, then filter out tasks that were sent by us
@@ -347,15 +359,16 @@ class MatrixQueue:
             if isinstance(whoami, WhoamiError):
                 raise Exception(whoami.message)
 
-        tasks = await self.get_tasks(timeout=timeout, since_token=self.checkpoint.since_token)
+        tasks, next_batch = await self.get_tasks(
+            timeout=timeout, since_token=self.checkpoint.since_token
+        )
         unacked = self.filter_acked_tasks(tasks, exclude_self=exclude_self)
         if not unacked:
-            logger.debug(f"No unacked tasks found for queue: {self.name}")
-            self.client.next_batch = await self.client.get_latest_sync_token(self.room_id)
+            self.client.next_batch = next_batch
             logger.info(
                 f"No unacked tasks, updating {self.checkpoint.type} checkpoint in room to: {self.client.next_batch}"
             )
-            await self.checkpoint.put_checkpoint_state(self.client.next_batch)
+            await self.checkpoint.update_checkpoint(self.client.next_batch)
 
         return self.name, unacked
 
@@ -366,25 +379,26 @@ class MatrixQueue:
         unacked_tasks = await self.get_unacked_tasks(timeout=0)
         return len(unacked_tasks[1]) == 0
 
-    async def task_is_acked(self, task_id: str, since: Optional[str] = None) -> bool:
+    async def task_is_acked(
+        self, task_id: str, task_room_id: str, since: Optional[str] = None
+    ) -> bool:
         """
         Returns a boolean for a task being acked or not.
         """
-        next_batch = since or self.checkpoint.since_token
+        next_batch = since or self.checkpoint.since_token or ""
 
-        # FIXME: Maybe this should be a method on a task type?
         queue_ack_type = self.task_types.ack
         expected_ack = f"{queue_ack_type}.{task_id}"
 
-        task_filter = create_room_message_filter(self.room_id, types=[expected_ack])
+        task_filter = create_room_message_filter(task_room_id, types=[expected_ack])
         tasks, _ = await run_room_message_filter(
-            self.client, self.room_id, task_filter, since=next_batch
+            self.client, task_room_id, task_filter, start="", end=""
         )
 
         # if anything for the room was returned, then the task was acked
-        return tasks.get(self.room_id) is not None
+        return tasks.get(task_room_id) is not None
 
-    async def ack_msg(self, task_id: str) -> None:
+    async def ack_msg(self, task_id: str, room_id: str) -> None:
         """
         Acks a given task id.
         """
@@ -395,11 +409,11 @@ class MatrixQueue:
             }
         )
         logger.debug(
-            f"Sending ack for task {task_id} to room: {self.room_id}\nAck type: {self.task_types.ack}.{task_id}",
+            f"Sending ack for task {task_id} to room: {room_id}\nAck type: {self.task_types.ack}.{task_id}",
         )
         await send_message(
             self.client,
-            self.room_id,
+            room_id,
             message=message,
             msgtype=f"{self.task_types.ack}.{task_id}",
             task_id=task_id,
@@ -433,7 +447,7 @@ class MatrixQueue:
         async def _yield_task():
             # ensure that task has not been acked since lock was acquired
             if not ignore_acks:
-                acked = await self.task_is_acked(task.id)
+                acked = await self.task_is_acked(task.id, task.room_id)
                 if acked:
                     raise TaskAlreadyAcked(task.id)
 
@@ -448,14 +462,14 @@ class MatrixQueue:
 
             return AckableMessage(
                 data=task_data,
-                ack=partial(self.ack_msg, task.id),
+                ack=partial(self.ack_msg, task.id, task.room_id),
             )
 
         if not lock:
             return await _yield_task()
 
         async with MatrixLock(
-            room_id=self.room_id,
+            room_id=task.room_id,
             homeserver_url=self.client.homeserver,
             access_token=self.client.access_token,
         ).lock(f"{self.task_types.lock}.{task.id}"):
@@ -488,9 +502,9 @@ class ReplicatedQueue(BroadcastQueue):
         name: str,
         homeserver_url: str,
         access_token: str,
-        room_id: str,
+        checkpoint_room_id: str,
         *args,
         **kwargs,
     ):
-        super().__init__(name, homeserver_url, access_token, room_id, *args, **kwargs)
+        super().__init__(name, homeserver_url, access_token, checkpoint_room_id, *args, **kwargs)
         self.checkpoint.type = f"{self.checkpoint.type}.{self.device_name}"
