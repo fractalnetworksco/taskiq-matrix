@@ -154,7 +154,7 @@ async def run_sync_filter(
         if content_only:
             d[room] = [get_content_only(event) for event in res.rooms.join[room].timeline.events]
         else:
-            d[room] = [event.source for event in res.rooms.join[room].timeline.events]
+            d[room] = [event for event in res.rooms.join[room].timeline.events]
 
     return d
 
@@ -218,7 +218,7 @@ async def run_room_message_filter(
         if content_only:
             d[room_id] = [get_content_only(event) for event in res.chunk]
         else:
-            d[room_id] = [event.source for event in res.chunk]
+            d[room_id] = [event for event in res.chunk]
 
     if direction == MessageDirection.back:
         return d, res.start

@@ -1,22 +1,28 @@
+import asyncio
 import json
 import logging
 import os
 import socket
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Self, Tuple, Union
 
+import appdirs
+from aiofiles import open as aopen
+from aiofiles.os import makedirs
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
     MessageDirection,
     RoomGetStateEventError,
     RoomMessagesResponse,
     RoomPutStateError,
+    SyncError,
     WhoamiError,
 )
 from taskiq import AckableMessage
 
 from .exceptions import CheckpointGetOrInitError, LockAcquireError, TaskAlreadyAcked
 from .filters import (
+    EMPTY_FILTER,
     create_room_message_filter,
     create_sync_filter,
     get_content_only,
@@ -24,7 +30,7 @@ from .filters import (
     run_sync_filter,
     sync_room_timelines,
 )
-from .lock import MatrixLock
+from .lock import AsyncFileLock, MatrixLock
 from .utils import send_message
 
 logger = logging.getLogger(__name__)
@@ -81,7 +87,110 @@ class Task:
         raise NotImplementedError
 
 
-class Checkpoint:
+class FileSystemCheckpoint:
+
+    type: str
+    since_token: Optional[str] = None
+    client: FractalAsyncClient
+    CHECKPOINT_DIR = os.environ.get("CHECKPOINT_PATH", appdirs.user_data_dir("taskiq-matrix"))
+
+    def __init__(
+        self,
+        type: str,
+        client: FractalAsyncClient,
+        since_token: Optional[str] = None,
+    ):
+        self.type = type
+        self.checkpoint_lock_type = f"{type}.lock"
+        self.checkpoint_path = os.path.join(self.CHECKPOINT_DIR, f"{type}.checkpoint")
+        self.client = client
+        self.since_token = since_token
+
+    async def get_or_init_checkpoint(self, full_sync: bool = False) -> Optional[str]:
+        """
+        Gets the current checkpoint from the Matrix server. If it doesn't exist,
+        it will be initialized.
+
+        Returns:
+            The current checkpoint or None if not found in room state.
+        """
+        # ensure checkpoint directory exists
+        await makedirs(self.CHECKPOINT_DIR, exist_ok=True)
+
+        # attempt to read checkpoint from file
+        try:
+            async with aopen(self.checkpoint_path, "r") as f:
+                self.since_token = await f.read()
+                logger.info("Read checkpoint from %s file: %s" % (self.type, self.since_token))
+                return self.since_token
+        except FileNotFoundError:
+            pass
+
+        logger.info("Checkpoint not found in %s file. Fetching latest sync token" % self.type)
+
+        if full_sync:
+            self.since_token = ""
+        else:
+            # fetch latest since token
+            resp = await self.client.sync(timeout=0, sync_filter=EMPTY_FILTER, since=None)
+            if isinstance(resp, SyncError):
+                raise Exception(resp.message)
+
+            self.since_token = resp.next_batch
+
+        try:
+            async with AsyncFileLock(self.checkpoint_lock_type, timeout=0).acquire_lock():
+                # write checkpoint to file
+                async with aopen(self.checkpoint_path, "w") as f:
+                    await f.write(self.since_token)
+        except LockAcquireError as e:
+            # failed to get lock so wait a bit to see if lock
+            # FIXME
+            logger.info("Someone else got the lock. Waiting for them to set the checkpoint")
+            await asyncio.sleep(0.5)
+            return await self.get_or_init_checkpoint(full_sync=full_sync)
+
+        return self.since_token
+
+    async def put_checkpoint_state(self, since_token: str) -> bool:
+        """
+        Writes current checkpoint to the file system
+
+        Returns:
+            True if the checkpoint was set, else False.
+        """
+        # acquire lock on checkpoint
+        try:
+            async with AsyncFileLock(self.checkpoint_lock_type, timeout=0).acquire_lock():
+                logger.info(f"Got {self.type} lock. Setting checkpoint for type {self.type}")
+                async with aopen(self.checkpoint_path, "w") as f:
+                    await f.write(since_token)
+                logger.info(f"Successfully set checkpoint for type: {self.type}")
+            return True
+        except LockAcquireError as e:
+            logger.info(f"Failed to set checkpoint: {e}\n")
+            return False
+
+    async def update_checkpoint(self, new_checkpoint: str) -> str:
+        """
+        Updates the current checkpoint on the file system.
+        """
+        # update the checkpoint state in the configured Matrix room
+        await self.put_checkpoint_state(new_checkpoint)
+        return new_checkpoint
+
+    async def clear_lock(self) -> None:
+        """
+        Clears the lock file for the checkpoint.
+        """
+        lock_path = os.path.join(self.CHECKPOINT_DIR, f"{self.checkpoint_lock_type}")
+        try:
+            os.remove(lock_path)
+        except FileNotFoundError:
+            pass
+
+
+class MatrixRoomCheckpoint:
     """
     A Checkpoint represents a point in time (Matrix sync token) at which
     all tasks prior to that point have been acked. Each Matrix backed task queue
@@ -184,7 +293,7 @@ class Checkpoint:
         return new_checkpoint
 
     @classmethod
-    async def create(cls, type: str, client: FractalAsyncClient, room_id: str) -> "Checkpoint":
+    async def create(cls, type: str, client: FractalAsyncClient, room_id: str) -> Self:
         """
         Create a Checkpoint instance for the given type.
         """
@@ -201,7 +310,7 @@ class MatrixQueue:
 
     name: str
     client: FractalAsyncClient
-    checkpoint: Checkpoint
+    checkpoint: FileSystemCheckpoint
     task_types: TaskTypes
 
     def __init__(
@@ -209,12 +318,11 @@ class MatrixQueue:
         name: str,
         homeserver_url: str,
         access_token: str,
-        checkpoint_room_id: str,
         device_name: str = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname()),
     ):
         self.client = FractalAsyncClient(homeserver_url=homeserver_url, access_token=access_token)
         self.name = name
-        self.checkpoint = Checkpoint(type=name, client=self.client, room_id=checkpoint_room_id)
+        self.checkpoint = FileSystemCheckpoint(type=name, client=self.client)
         self.task_types = TaskTypes(name)
         self.device_name = device_name
 
@@ -269,7 +377,12 @@ class MatrixQueue:
                     room_id, types=[self.task_types.task, f"{self.task_types.ack}.*"]
                 )
                 task_events, more_messages = await run_room_message_filter(
-                    self.client, room_id, task_filter, start=next_batch, end=prev_batch
+                    self.client,
+                    room_id,
+                    task_filter,
+                    start=next_batch,
+                    end=prev_batch,
+                    content_only=False,
                 )
 
                 # prepend the events to the list of events since these events are older
@@ -284,6 +397,7 @@ class MatrixQueue:
                         task_filter,
                         start=more_messages,
                         end=prev_batch,
+                        content_only=False,
                     )
                     events = task_events.get(room_id, []) + events
 
@@ -481,6 +595,9 @@ class MatrixQueue:
         """
         await self.client.close()
 
+        # clear lock file for checkpoint
+        await self.checkpoint.clear_lock()
+
 
 class BroadcastQueue(MatrixQueue):
     # FIXME: instead of locking in the matrix room, lock locally since
@@ -502,9 +619,8 @@ class ReplicatedQueue(BroadcastQueue):
         name: str,
         homeserver_url: str,
         access_token: str,
-        checkpoint_room_id: str,
         *args,
         **kwargs,
     ):
-        super().__init__(name, homeserver_url, access_token, checkpoint_room_id, *args, **kwargs)
+        super().__init__(name, homeserver_url, access_token, *args, **kwargs)
         self.checkpoint.type = f"{self.checkpoint.type}.{self.device_name}"

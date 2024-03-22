@@ -80,34 +80,6 @@ class MatrixBroker(AsyncBroker):
         self.access_token = access_token
         return self
 
-    async def _init_checkpoint_room(self) -> str:
-        try:
-            if not all([self.homeserver_url, self.access_token]):
-                raise Exception("Matrix config must be set with with_matrix_config.")
-        except Exception:
-            raise Exception("Matrix config must be set with with_matrix_config.")
-
-        # FIXME: Should lock on the filesystem to avoid creating the room multiple times
-        # since the worker runs per cpu core
-        async with MatrixClient(
-            homeserver_url=self.homeserver_url, access_token=self.access_token
-        ) as client:
-            sync_filter = create_sync_filter(types=[self.CHECKPOINT_ROOM_STATE_TYPE])
-            res = await client.sync(timeout=0, sync_filter=sync_filter)
-            if isinstance(res, RoomGetStateEventResponse):
-                logger.debug(f"Checkpoint room {res.room_id} already exists")
-                self.checkpoint_room_id = res.room_id
-                return res.room_id
-
-            logger.info("Creating checkpoint room")
-            res = await client.room_create(
-                initial_state=[{"type": self.CHECKPOINT_ROOM_STATE_TYPE, "content": {}}]
-            )
-            if isinstance(res, RoomCreateError):
-                raise Exception(f"Failed to create checkpoint room: {res.message}")
-            self.checkpoint_room_id = res.room_id
-            return res.room_id
-
     async def _init_queues(self):
         try:
             if not all([self.homeserver_url, self.access_token]):
@@ -116,112 +88,37 @@ class MatrixBroker(AsyncBroker):
             raise Exception("Matrix config must be set with with_matrix_config.")
 
         # sets self.checkpoint_room_id
-        await self._init_checkpoint_room()
+        # await self._init_checkpoint_room()
 
         if not hasattr(self, "mutex_queue"):
             self.mutex_queue = MatrixQueue(
-                "mutex",
-                homeserver_url=self.homeserver_url,
-                access_token=self.access_token,
-                checkpoint_room_id=self.checkpoint_room_id,
+                "mutex", homeserver_url=self.homeserver_url, access_token=self.access_token
             )
+            await self.mutex_queue.checkpoint.clear_lock()
             self.device_queue = MatrixQueue(
                 f"device.{self.device_name}",
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
-                checkpoint_room_id=self.checkpoint_room_id,
             )
+            await self.device_queue.checkpoint.clear_lock()
             self.broadcast_queue = BroadcastQueue(
                 "broadcast",
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
-                checkpoint_room_id=self.checkpoint_room_id,
             )
+            await self.broadcast_queue.checkpoint.clear_lock()
             self.replication_queue = ReplicatedQueue(
                 "replication",
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
-                checkpoint_room_id=self.checkpoint_room_id,
             )
+            await self.replication_queue.checkpoint.clear_lock()
 
     def with_result_backend(self, result_backend: AsyncResultBackend[_T]) -> Self:
         if not isinstance(result_backend, MatrixResultBackend):
             raise Exception("result_backend must be an instance of MatrixResultBackend")
 
         return super().with_result_backend(result_backend)
-
-    async def add_mutex_checkpoint_task(self) -> bool:
-        """
-        Adds the mutex checkpoint task to the room's taskiq.schedules
-        if it isn't already there.
-
-        Returns:
-            True if the checkpoint task was added (or already exists), else False.
-        """
-        task = {
-            "name": "taskiq.update_checkpoint",
-            "cron": "* * * * *",
-            "labels": {"task_id": "mutex_checkpoint", "queue": "mutex"},
-            "args": ["mutex"],
-            "kwargs": {},
-        }
-        schedules = await self.mutex_queue.client.room_get_state_event(
-            self.mutex_queue.checkpoint.room_id,
-            SCHEDULE_STATE_TYPE,
-        )
-
-        if isinstance(schedules, RoomGetStateEventError):
-            if schedules.status_code != "M_NOT_FOUND":
-                raise Exception(schedules.message)
-
-            logger.info(
-                "No schedules found for room %s, will attempt to add checkpoint task",
-                self.mutex_queue.checkpoint.room_id,
-            )
-            content = {"tasks": [task]}
-
-        # nio for some reason does not return a RoomGetStateEventError when
-        # the user is not in the room (M_FORBIDDEN). Instead, the content
-        # will be a dict with an "errcode" key.
-        elif "errcode" in schedules.content:
-            raise Exception(schedules.content["error"])
-
-        elif task not in schedules.content["tasks"]:
-            # there were already scheduled tasks in the room but the checkpoint
-            # task was not found in the list of tasks, so add it
-            logger.debug(
-                f"Checkpoint task not found in {self.mutex_queue.checkpoint.room_id} schedules, adding it",
-            )
-            schedules.content["tasks"].append(task)
-            content = schedules.content
-
-        else:
-            logger.debug(
-                f"Checkpoint task already exists in {self.mutex_queue.checkpoint.room_id} schedules"
-            )
-            return True
-
-        # update schedule state to include checkpoint task
-        try:
-            async with MatrixLock(room_id=self.mutex_queue.checkpoint.room_id).lock(
-                SCHEDULE_STATE_TYPE
-            ):
-                logger.info(
-                    f"Adding checkpoint task to {self.mutex_queue.checkpoint.room_id} schedules"
-                )
-                res = await self.mutex_queue.client.room_put_state(
-                    self.mutex_queue.checkpoint.room_id,
-                    SCHEDULE_STATE_TYPE,
-                    content,
-                )
-                if isinstance(res, RoomPutStateError):
-                    logger.error(f"Failed to add checkpoint task: {res}")
-                    return False
-                else:
-                    return True
-        except LockAcquireError as e:
-            logger.error(f"{e}\n\n")
-            return False
 
     async def update_checkpoints(self, interval: int = 60):
         """
@@ -239,6 +136,7 @@ class MatrixBroker(AsyncBroker):
                 try:
                     # run checkpoint updates in parallel
                     await asyncio.gather(
+                        update_checkpoint("mutex"),
                         update_checkpoint("device"),
                         update_checkpoint("broadcast"),
                         update_checkpoint("replication"),
@@ -258,7 +156,6 @@ class MatrixBroker(AsyncBroker):
         await super().startup()
 
         # initialize checkpoint room
-        await self._init_checkpoint_room()
 
         # create and initialize queues and their checkpoints
         await self._init_queues()
@@ -269,9 +166,6 @@ class MatrixBroker(AsyncBroker):
         # sync any tasks that were sent before the checkpoint was created for
         # this device
         await self.replication_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
-
-        # ensure that checkpoint schedule task is added to schedules
-        await self.add_mutex_checkpoint_task()
 
         # launch background task that updates device checkpoints
         # FIXME: reenable once fixed to work with refactor
@@ -437,7 +331,7 @@ class MatrixBroker(AsyncBroker):
                             sync_task_results.append(pending_tasks)
                             logger.debug(f"Got {len(pending_tasks)} tasks from {queue}")
                     except Exception as e:
-                        logger.error(f"Sync failed: {e}")
+                        logger.exception(f"Sync failed: {e}")
 
                     # Reschedule a new task for the completed queue
                     if queue_name == "replication_queue":

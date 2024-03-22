@@ -1,11 +1,15 @@
+import asyncio
 import json
 import logging
 import os
+import tempfile
 from base64 import b64encode
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 from uuid import uuid4
 
+from filelock import FileLock
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
     MatrixRoom,
@@ -225,3 +229,40 @@ class MatrixLock:
         if not isinstance(res, RoomMessagesError):
             return res.start
         raise Exception(f"Failed to get sync token for room {self.room_id}")
+
+
+class AsyncFileLock:
+    lock_path = tempfile.gettempdir()
+
+    def __init__(self, lock_file: str, timeout: int = 0):
+        self.type = lock_file
+        self.lock = FileLock(f"{self.lock_path}{os.path.sep}{self.type}", timeout=timeout)
+        self.loop = asyncio.get_event_loop()
+
+    @asynccontextmanager
+    async def acquire_lock(self):
+        try:
+            await self.loop.run_in_executor(None, self.lock.acquire)
+        except TimeoutError:
+            raise LockAcquireError(f"Could not acquire lock for {self.type}")
+
+        try:
+            logger.info("Got the lock for %s" % self.type)
+            yield self.lock
+        finally:
+            logger.info("Release lock %s" % self.type)
+            await self.loop.run_in_executor(None, self.lock.release)
+
+    # async def __aenter__(self):
+    #     try:
+    #         await self.loop.run_in_executor(None, self.lock.acquire)
+    #     except TimeoutError:
+    #         raise LockAcquireError("Could not acquire lock")
+
+    #     yield self.lock
+
+    #     return self.lock
+
+    # async def __aexit__(self, exc_type, exc_val, exc_tb):
+    #     await self.loop.run_in_executor(None, self.lock.release)
+    #     return False
