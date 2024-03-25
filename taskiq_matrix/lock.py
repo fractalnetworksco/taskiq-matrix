@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -9,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 from uuid import uuid4
 
-from filelock import FileLock
+from filelock import FileLock, UnixFileLock
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
     MatrixRoom,
@@ -234,35 +235,25 @@ class MatrixLock:
 class AsyncFileLock:
     lock_path = tempfile.gettempdir()
 
-    def __init__(self, lock_file: str, timeout: int = 0):
+    def __init__(self, lock_file: str):
         self.type = lock_file
-        self.lock = FileLock(f"{self.lock_path}{os.path.sep}{self.type}", timeout=timeout)
+        self.lock = UnixFileLock(
+            f"{self.lock_path}{os.path.sep}{self.type}", timeout=0, is_singleton=True
+        )
         self.loop = asyncio.get_event_loop()
+        self.executor = ThreadPoolExecutor(max_workers=1)
 
     @asynccontextmanager
     async def acquire_lock(self):
+        acquire = functools.partial(self.lock.acquire, blocking=False)
         try:
-            await self.loop.run_in_executor(None, self.lock.acquire)
+            await self.loop.run_in_executor(self.executor, acquire)
         except TimeoutError:
             raise LockAcquireError(f"Could not acquire lock for {self.type}")
 
+        logger.debug("Acquired lock on %s" % self.lock.lock_file)
         try:
-            logger.info("Got the lock for %s" % self.type)
             yield self.lock
         finally:
-            logger.info("Release lock %s" % self.type)
-            await self.loop.run_in_executor(None, self.lock.release)
-
-    # async def __aenter__(self):
-    #     try:
-    #         await self.loop.run_in_executor(None, self.lock.acquire)
-    #     except TimeoutError:
-    #         raise LockAcquireError("Could not acquire lock")
-
-    #     yield self.lock
-
-    #     return self.lock
-
-    # async def __aexit__(self, exc_type, exc_val, exc_tb):
-    #     await self.loop.run_in_executor(None, self.lock.release)
-    #     return False
+            logger.debug("Releasing lock on %s" % self.type)
+            await self.loop.run_in_executor(self.executor, self.lock.release)

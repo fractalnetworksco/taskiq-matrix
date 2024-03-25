@@ -139,7 +139,7 @@ class FileSystemCheckpoint:
             self.since_token = resp.next_batch
 
         try:
-            async with AsyncFileLock(self.checkpoint_lock_type, timeout=0).acquire_lock():
+            async with AsyncFileLock(self.checkpoint_lock_type).acquire_lock():
                 # write checkpoint to file
                 async with aopen(self.checkpoint_path, "w") as f:
                     await f.write(self.since_token)
@@ -161,14 +161,14 @@ class FileSystemCheckpoint:
         """
         # acquire lock on checkpoint
         try:
-            async with AsyncFileLock(self.checkpoint_lock_type, timeout=0).acquire_lock():
-                logger.info(f"Got {self.type} lock. Setting checkpoint for type {self.type}")
+            async with AsyncFileLock(self.checkpoint_lock_type).acquire_lock():
+                # logger.info(f"Got {self.type} lock. Setting checkpoint for type {self.type}")
                 async with aopen(self.checkpoint_path, "w") as f:
                     await f.write(since_token)
                 logger.info(f"Successfully set checkpoint for type: {self.type}")
             return True
         except LockAcquireError as e:
-            logger.info(f"Failed to set checkpoint: {e}\n")
+            logger.warning(f"Failed to set checkpoint: {e}\n")
             return False
 
     async def update_checkpoint(self, new_checkpoint: str) -> str:
@@ -177,6 +177,7 @@ class FileSystemCheckpoint:
         """
         # update the checkpoint state in the configured Matrix room
         await self.put_checkpoint_state(new_checkpoint)
+        self.since_token = new_checkpoint
         return new_checkpoint
 
     async def clear_lock(self) -> None:
@@ -326,6 +327,44 @@ class MatrixQueue:
         self.task_types = TaskTypes(name)
         self.device_name = device_name
 
+    async def get_tasks_from_room(
+        self,
+        room_id: str,
+        task_filter: Optional[Dict[str, Any]] = None,
+        start: str = "",
+        end: str = "",
+    ) -> Tuple[list[Task], Optional[str]]:
+        """
+        Fetches tasks from a room using a task filter.
+
+        Args:
+            room_id (str): The room id to fetch tasks from.
+            task_filter (dict): The filter to use when fetching tasks.
+
+        Returns:
+            A dictionary of tasks.
+        """
+        if not task_filter:
+            task_filter = create_room_message_filter(
+                room_id, types=[self.task_types.task, f"{self.task_types.ack}.*"]
+            )
+
+        events, next_batch = await run_room_message_filter(
+            self.client,
+            room_id,
+            task_filter,
+            start=start,
+            end=end,
+            content_only=False,
+        )
+
+        if not events:
+            return [], None
+
+        tasks = [Task(room_id=room_id, **get_content_only(event)) for event in events[room_id]]
+
+        return tasks, next_batch
+
     async def get_tasks(
         self,
         timeout: int = 30000,
@@ -339,7 +378,7 @@ class MatrixQueue:
             timeout (int): The timeout to use when fetching tasks.
             since_token (str): The next batch token to use when fetching tasks.
                                Defaults to the current checkpoint of the broker.
-            task_fitler (dict): A filter to use when fetching tasks. Defaults to
+            task_filter (dict): A filter to use when fetching tasks. Defaults to
                                 a filter that fetches all tasks and acks for the
                                 queue.
 
@@ -358,6 +397,7 @@ class MatrixQueue:
             self.client, task_filter, timeout=timeout, since=next_batch
         )
 
+        # logger.info("Room timelines: %s" % room_timelines)
         tasks = []
         for room_id, timeline in room_timelines.items():
             events = timeline.events
@@ -403,12 +443,6 @@ class MatrixQueue:
 
             # create tasks from the list of events
             tasks.extend([Task(room_id=room_id, **get_content_only(event)) for event in events])
-
-        if tasks:
-            # if tasks were returned, then reset the next_batch to the previous next batch so that we dont skip
-            # any tasks if some error occurs. We want to keep fetching the same tasks until they are all acked
-            # and only then should we update the next batch (checkpoint)
-            self.client.next_batch = next_batch
 
         return tasks, self.client.next_batch
 
@@ -473,18 +507,28 @@ class MatrixQueue:
             if isinstance(whoami, WhoamiError):
                 raise Exception(whoami.message)
 
+        # save current next batch in the event that tasks are returned.
+        # we don't want to skip over tasks if some error occurs.
+        prev_batch = self.client.next_batch
+
         tasks, next_batch = await self.get_tasks(
             timeout=timeout, since_token=self.checkpoint.since_token
         )
-        unacked = self.filter_acked_tasks(tasks, exclude_self=exclude_self)
-        if not unacked:
+        unacked_tasks = self.filter_acked_tasks(tasks, exclude_self=exclude_self)
+        if not unacked_tasks:
+            # if there are no unacked tasks, then update the checkpoint to the next batch
             self.client.next_batch = next_batch
-            logger.info(
+            logger.debug(
                 f"No unacked tasks, updating {self.checkpoint.type} checkpoint in room to: {self.client.next_batch}"
             )
             await self.checkpoint.update_checkpoint(self.client.next_batch)
+        else:
+            # some tasks were received, so reset the next batch to the previous next batch
+            # for the next fetch. This is so that we keep fetching the same tasks until they
+            # are all acked and only then should we update the next batch (checkpoint).
+            self.client.next_batch = prev_batch
 
-        return self.name, unacked
+        return self.name, unacked_tasks
 
     async def all_tasks_acked(self) -> bool:
         """

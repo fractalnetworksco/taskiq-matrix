@@ -87,66 +87,30 @@ class MatrixBroker(AsyncBroker):
         except Exception:
             raise Exception("Matrix config must be set with with_matrix_config.")
 
-        # sets self.checkpoint_room_id
-        # await self._init_checkpoint_room()
-
         if not hasattr(self, "mutex_queue"):
             self.mutex_queue = MatrixQueue(
                 "mutex", homeserver_url=self.homeserver_url, access_token=self.access_token
             )
-            await self.mutex_queue.checkpoint.clear_lock()
             self.device_queue = MatrixQueue(
                 f"device.{self.device_name}",
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
             )
-            await self.device_queue.checkpoint.clear_lock()
             self.broadcast_queue = BroadcastQueue(
                 "broadcast",
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
             )
-            await self.broadcast_queue.checkpoint.clear_lock()
             self.replication_queue = ReplicatedQueue(
                 "replication",
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
             )
-            await self.replication_queue.checkpoint.clear_lock()
 
     def with_result_backend(self, result_backend: AsyncResultBackend[_T]) -> Self:
         if not isinstance(result_backend, MatrixResultBackend):
             raise Exception("result_backend must be an instance of MatrixResultBackend")
-
         return super().with_result_backend(result_backend)
-
-    async def update_checkpoints(self, interval: int = 60):
-        """
-        Background task that periodically updates the device, broadcast,
-        and replication queue checkpoints.
-
-        Args:
-            interval (int): The interval in seconds to update the checkpoints.
-                            Defaults to 60 seconds.
-        """
-        from .tasks import update_checkpoint
-
-        try:
-            while True:
-                try:
-                    # run checkpoint updates in parallel
-                    await asyncio.gather(
-                        update_checkpoint("mutex"),
-                        update_checkpoint("device"),
-                        update_checkpoint("broadcast"),
-                        update_checkpoint("replication"),
-                    )
-                except Exception as err:
-                    logger.error("Encountered error in update_device_checkpoint: %s", err.args)
-
-                await asyncio.sleep(interval)
-        except asyncio.CancelledError:
-            return None
 
     async def startup(self) -> None:
         """
@@ -154,8 +118,6 @@ class MatrixBroker(AsyncBroker):
         """
         logger.info("Starting Taskiq Matrix Broker")
         await super().startup()
-
-        # initialize checkpoint room
 
         # create and initialize queues and their checkpoints
         await self._init_queues()
@@ -167,20 +129,11 @@ class MatrixBroker(AsyncBroker):
         # this device
         await self.replication_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
 
-        # launch background task that updates device checkpoints
-        # FIXME: reenable once fixed to work with refactor
-        # self.checkpoint_updater = asyncio.create_task(self.update_checkpoints())
-
-        return None
-
     async def shutdown(self) -> None:
         """
         Shuts down the broker.
         """
         logger.info("Shutting down the broker")
-        if hasattr(self, "checkpoint_updater"):
-            self.checkpoint_updater.cancel()
-            await self.checkpoint_updater
 
         await self.device_queue.shutdown()
         await self.broadcast_queue.shutdown()
@@ -335,7 +288,6 @@ class MatrixBroker(AsyncBroker):
 
                     # Reschedule a new task for the completed queue
                     if queue_name == "replication_queue":
-                        logger.info("Rescheduling replication_queue task")
                         tasks[queue_name] = asyncio.create_task(
                             getattr(self, queue_name).get_unacked_tasks(exclude_self=True),
                             name=queue_name,

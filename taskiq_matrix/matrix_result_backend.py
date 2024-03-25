@@ -86,14 +86,12 @@ class MatrixResultBackend(AsyncResultBackend):
         # ensure that the device name is set in labels for the result
         result.labels.update({"device": self.device_name})
 
-        import pdb
-
-        pdb.set_trace()
-
         try:
             room_id = result.labels["room_id"]
         except KeyError:
-            raise KeyError("room_id is not set in the labels of the result")
+            raise KeyError(f"room_id is not set in the labels of the result: {result}")
+
+        logger.debug("Setting result for task %s" % task_id)
 
         message: Dict[str, Union[str, bytes, int]] = {
             "name": task_id,
