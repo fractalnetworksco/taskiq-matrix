@@ -141,7 +141,7 @@ def test_multiple_broker_message():
     Create a BrokerMessage Fixture
     """
 
-    async def create(num_messages: int):
+    async def create(num_messages: int, room_id: str):
         messages = []
         for i in range(num_messages):
             task_id = str(uuid4())
@@ -158,7 +158,10 @@ def test_multiple_broker_message():
 
             messages.append(
                 BrokerMessage(
-                    task_id=task_id, task_name="test_name", message=message_bytes, labels={}
+                    task_id=task_id,
+                    task_name="test_name",
+                    message=message_bytes,
+                    labels={"room_id": room_id},
                 )
             )
 
@@ -198,7 +201,12 @@ def unknown_event_factory() -> Callable[[str, str], UnknownEvent]:
                 "event_id": "test_event_id",
                 "sender": sender,
                 "origin_server_ts": 0,
-                "content": {"msgtype": msgtype, "body": body, "sender": sender, "room_id": room_id},
+                "content": {
+                    "msgtype": msgtype,
+                    "body": body,
+                    "sender": sender,
+                    "room_id": room_id,
+                },
             },
             type=msgtype,
         )
