@@ -138,17 +138,7 @@ class FileSystemCheckpoint:
 
             self.since_token = resp.next_batch
 
-        try:
-            async with AsyncFileLock(self.checkpoint_lock_type).acquire_lock():
-                # write checkpoint to file
-                async with aopen(self.checkpoint_path, "w") as f:
-                    await f.write(self.since_token)
-        except LockAcquireError as e:
-            # failed to get lock so wait a bit to see if lock
-            # FIXME
-            logger.info("Someone else got the lock. Waiting for them to set the checkpoint")
-            await asyncio.sleep(0.5)
-            return await self.get_or_init_checkpoint(full_sync=full_sync)
+        await self.put_checkpoint_state(self.since_token)
 
         return self.since_token
 
@@ -159,10 +149,12 @@ class FileSystemCheckpoint:
         Returns:
             True if the checkpoint was set, else False.
         """
+        # ensure checkpoint directory exists
+        await makedirs(self.CHECKPOINT_DIR, exist_ok=True)
+
         # acquire lock on checkpoint
         try:
             async with AsyncFileLock(self.checkpoint_lock_type).acquire_lock():
-                # logger.info(f"Got {self.type} lock. Setting checkpoint for type {self.type}")
                 async with aopen(self.checkpoint_path, "w") as f:
                     await f.write(since_token)
                 logger.info(f"Successfully set checkpoint for type: {self.type}")
@@ -179,16 +171,6 @@ class FileSystemCheckpoint:
         await self.put_checkpoint_state(new_checkpoint)
         self.since_token = new_checkpoint
         return new_checkpoint
-
-    async def clear_lock(self) -> None:
-        """
-        Clears the lock file for the checkpoint.
-        """
-        lock_path = os.path.join(self.CHECKPOINT_DIR, f"{self.checkpoint_lock_type}")
-        try:
-            os.remove(lock_path)
-        except FileNotFoundError:
-            pass
 
 
 class MatrixRoomCheckpoint:
@@ -397,7 +379,6 @@ class MatrixQueue:
             self.client, task_filter, timeout=timeout, since=next_batch
         )
 
-        # logger.info("Room timelines: %s" % room_timelines)
         tasks = []
         for room_id, timeline in room_timelines.items():
             events = timeline.events
@@ -534,8 +515,8 @@ class MatrixQueue:
         """
         Returns a boolean for all tasks being acked or not.
         """
-        unacked_tasks = await self.get_unacked_tasks(timeout=0)
-        return len(unacked_tasks[1]) == 0
+        _, unacked_tasks = await self.get_unacked_tasks(timeout=0)
+        return len(unacked_tasks) == 0
 
     async def task_is_acked(
         self, task_id: str, task_room_id: str, since: Optional[str] = None
@@ -543,8 +524,6 @@ class MatrixQueue:
         """
         Returns a boolean for a task being acked or not.
         """
-        next_batch = since or self.checkpoint.since_token or ""
-
         queue_ack_type = self.task_types.ack
         expected_ack = f"{queue_ack_type}.{task_id}"
 
@@ -637,10 +616,7 @@ class MatrixQueue:
         """
         Closes the Queue's Matrix client session.
         """
-        await self.client.close()
-
-        # clear lock file for checkpoint
-        await self.checkpoint.clear_lock()
+        return await self.client.close()
 
 
 class BroadcastQueue(MatrixQueue):

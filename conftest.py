@@ -83,7 +83,9 @@ class MockAsyncIterable:
 
 
 @pytest.fixture(scope="function")
-def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
+def test_matrix_broker(
+    new_matrix_room: Callable[[], Awaitable[str]]
+) -> Callable[[], Awaitable[MatrixBroker]]:
     async def create():
         """
         Creates a MatrixBroker instance whose queues are configured to
@@ -173,15 +175,17 @@ def test_multiple_broker_message():
     return create
 
 
-@pytest.fixture(scope="function")
-def test_checkpoint(test_room_id):
-    mock_client_parameter = MagicMock(spec=FractalAsyncClient)
-    mock_client_parameter.homeserver = TEST_HOMESERVER_URL
-    mock_client_parameter.access_token = TEST_USER_ACCESS_TOKEN
-    mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
-    )
-    return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
+@pytest.fixture
+def test_checkpoint(matrix_client):
+    checkpoint = FileSystemCheckpoint(type="abc", client=matrix_client)
+    # ensure checkpoint paths are all cleared
+    try:
+        shutil.rmtree(checkpoint.CHECKPOINT_DIR)
+    except FileNotFoundError:
+        pass
+
+    return checkpoint
+
 
 
 @pytest.fixture
