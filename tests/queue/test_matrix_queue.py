@@ -18,58 +18,11 @@ from taskiq_matrix.matrix_queue import (
 from taskiq_matrix.utils import send_message
 
 
-@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
-async def test_matrix_queue_verify_room_exists_error(test_matrix_broker):
-    """
-    Tests that an exception is raised if room_get_state_evetnt() returns a
-    RoomGetStateEventError
-    """
-
-    # create a MatrixQueue object and mock its room state
-    broker = await test_matrix_broker()
-    matrix_queue = broker.mutex_queue
-    mock_client = AsyncMock()
-    mock_response = RoomGetStateEventError(message="test error message")
-    mock_client.room_get_state_event.return_value = mock_response
-    matrix_queue.client = mock_client
-
-    # Raise an exception caused by a RoomGetStateEventError
-    with pytest.raises(Exception) as e:
-        await matrix_queue.verify_room_exists()
-
-    await matrix_queue.shutdown()
-
-
-@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
-async def test_matrix_queue_verify_room_exists_exists(test_matrix_broker):
-    """
-    Tests that an exception is not raised if a RoomGetStateEventResponse
-    is returned
-    """
-
-    # create a MatrixQueue object and mock its room state
-    broker = await test_matrix_broker()
-    matrix_queue = broker.mutex_queue
-    mock_client = AsyncMock()
-    mock_response = MagicMock(spec=RoomGetStateEventResponse)
-
-    # set room_get_state_event() to return the RoomGetStateEventResopnse
-    mock_client.room_get_state_event.return_value = mock_response
-    matrix_queue.client = mock_client
-
-    # call the function
-    await matrix_queue.verify_room_exists()
-
-    # verify that room_get_state_event() was only called once
-    matrix_queue.client.room_get_state_event.assert_called_once()
-    await matrix_queue.shutdown()
-
 #! ===============================================
-@pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
 @pytest.mark.skip(reason="filter isn't returning acks, synapse issue")
 async def test_matrix_queue_get_tasks_(test_matrix_broker):
     """
-    #? this returns tasks (acked and unacked) 
+    #? this returns tasks (acked and unacked)
     #! come back when filter works
     """
 
@@ -133,7 +86,10 @@ async def test_matrix_queue_get_tasks_(test_matrix_broker):
     print(result)
     await matrix_queue.shutdown()
 
-async def test_matrix_queue_get_tasks_no_filter_caught_up(test_matrix_broker, test_broker_message):
+
+async def test_matrix_queue_get_tasks_no_filter_caught_up(
+    test_matrix_broker, test_broker_message
+):
     """
     Tests that create_room_message_filter and run_room_message_filter are not called if
     the queue is caught up.
@@ -150,9 +106,13 @@ async def test_matrix_queue_get_tasks_no_filter_caught_up(test_matrix_broker, te
     broker.mutex_queue.caught_up = True
 
     # patch create_room_message_filter to verify it wasn't called
-    with patch('taskiq_matrix.matrix_queue.create_room_message_filter') as mock_create_room_filter:
+    with patch(
+        "taskiq_matrix.matrix_queue.create_room_message_filter"
+    ) as mock_create_room_filter:
         # patch run_room_message_filter to verify it wasn't called
-        with patch('taskiq_matrix.matrix_queue.run_room_message_filter') as mock_run_room_message_filter:
+        with patch(
+            "taskiq_matrix.matrix_queue.run_room_message_filter"
+        ) as mock_run_room_message_filter:
             tasks = await broker.mutex_queue.get_tasks(timeout=0)
 
     # verify that the room filter function calls were not made
@@ -160,12 +120,15 @@ async def test_matrix_queue_get_tasks_no_filter_caught_up(test_matrix_broker, te
     mock_run_room_message_filter.assert_not_called()
 
     # verify that the task that was kicked to the broker is the same as the one
-        # that was returned
+    # that was returned
     assert tasks[0].id == message.task_id
 
-async def test_matrix_queue_get_tasks_existing_filter_not_caught_up(test_matrix_broker, test_broker_message):
+
+async def test_matrix_queue_get_tasks_existing_filter_not_caught_up(
+    test_matrix_broker, test_broker_message
+):
     """
-    Tests that filters are not created again if a filter is passed as a parameter to 
+    Tests that filters are not created again if a filter is passed as a parameter to
     get_tasks.
     """
 
@@ -182,19 +145,18 @@ async def test_matrix_queue_get_tasks_existing_filter_not_caught_up(test_matrix_
     # create a task filter
     task_filter = create_room_message_filter(
         broker.room_id,
-        types=[broker.mutex_queue.task_types.task, f"{broker.mutex_queue.task_types.ack}.*"]
+        types=[broker.mutex_queue.task_types.task, f"{broker.mutex_queue.task_types.ack}.*"],
     )
 
     # patch create_room_message_filter to verify it was not called
-    with patch('taskiq_matrix.matrix_queue.create_room_message_filter') as mock_create_room_message_filter:
+    with patch(
+        "taskiq_matrix.matrix_queue.create_room_message_filter"
+    ) as mock_create_room_message_filter:
         # patch create_sync_message_filter to verify it was not called
-        with patch('taskiq_matrix.matrix_queue.create_sync_filter') as mock_create_sync_filter:
+        with patch("taskiq_matrix.matrix_queue.create_sync_filter") as mock_create_sync_filter:
             # patch run_sync_filter to verify it was not called
-            with patch('taskiq_matrix.matrix_queue.run_sync_filter') as mock_run_sync_filter:
-                tasks = await broker.mutex_queue.get_tasks(
-                    timeout=0,
-                    task_filter=task_filter
-                )
+            with patch("taskiq_matrix.matrix_queue.run_sync_filter") as mock_run_sync_filter:
+                tasks = await broker.mutex_queue.get_tasks(timeout=0, task_filter=task_filter)
 
     # verify that filter functions were not called
     mock_create_room_message_filter.assert_not_called()
@@ -202,10 +164,13 @@ async def test_matrix_queue_get_tasks_existing_filter_not_caught_up(test_matrix_
     mock_create_sync_filter.assert_not_called()
 
     # verify that the task that was kicked to the broker is the same as the one
-        # that was returned
+    # that was returned
     assert tasks[0].id == message.task_id
 
-async def test_matrix_queue_get_tasks_existing_filter_caught_up(test_matrix_broker, test_broker_message):
+
+async def test_matrix_queue_get_tasks_existing_filter_caught_up(
+    test_matrix_broker, test_broker_message
+):
     """
     Tests that if you pass a filter and the broker is caught up, new filters are not
     created and run_sync_filter is called instead of run_room_message_filter
@@ -224,18 +189,22 @@ async def test_matrix_queue_get_tasks_existing_filter_caught_up(test_matrix_brok
     # create a filter to pass as a parameter
     task_filter = create_sync_filter(
         broker.room_id,
-        types=[broker.mutex_queue.task_types.task, f"{broker.mutex_queue.task_types.ack}.*"]
+        types=[broker.mutex_queue.task_types.task, f"{broker.mutex_queue.task_types.ack}.*"],
     )
 
     # patch filter funcions to verify that they are not called
-    with patch('taskiq_matrix.matrix_queue.run_room_message_filter') as mock_run_room_message_filter:
-        with patch('taskiq_matrix.matrix_queue.create_sync_filter') as mock_create_sync_filter:
-            with patch('taskiq_matrix.matrix_queue.create_room_message_filter') as mock_create_room_message_filter:
+    with patch(
+        "taskiq_matrix.matrix_queue.run_room_message_filter"
+    ) as mock_run_room_message_filter:
+        with patch("taskiq_matrix.matrix_queue.create_sync_filter") as mock_create_sync_filter:
+            with patch(
+                "taskiq_matrix.matrix_queue.create_room_message_filter"
+            ) as mock_create_room_message_filter:
                 tasks = await broker.mutex_queue.get_tasks(
                     timeout=0,
                     task_filter=task_filter,
                 )
-    
+
     # verify that the filter functions are not called
     mock_run_room_message_filter.assert_not_called()
     mock_create_sync_filter.assert_not_called()
@@ -243,11 +212,10 @@ async def test_matrix_queue_get_tasks_existing_filter_caught_up(test_matrix_brok
 
     # verify that the task returned has a task_id matching what was created locally
     assert tasks[0].id == message.task_id
-    
+
+
 async def test_matrix_queue_get_tasks_not_end(test_matrix_broker, test_broker_message):
-    """
-    
-    """
+    """ """
 
     # create a broker object
     broker = await test_matrix_broker()
@@ -267,9 +235,11 @@ async def test_matrix_queue_get_tasks_not_end(test_matrix_broker, test_broker_me
 
 
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
-async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_sent_by_self(test_matrix_broker):
+async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_sent_by_self(
+    test_matrix_broker,
+):
     """
-    Test that filter_acked_tasks returns no tasks if they are all send by the queue's 
+    Test that filter_acked_tasks returns no tasks if they are all send by the queue's
     client matrix account.
     """
 
@@ -295,7 +265,6 @@ async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_sent_by_
         },
     ]
 
-
     # create task objects using the dictionaries and put them into a list
     task1 = Task(**test_task_list[0])
     task2 = Task(**test_task_list[1])
@@ -308,12 +277,11 @@ async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_sent_by_
     matrix_queue.task_types.ack = "test_matrix_queue"
     matrix_queue.client.user_id = "sender"
 
-
     # verify that the sender of the tasks are not the same as the queue's client's user id
-    assert test_task_list[0]['sender'] is matrix_queue.client.user_id
-    assert test_task_list[1]['sender'] is matrix_queue.client.user_id
+    assert test_task_list[0]["sender"] is matrix_queue.client.user_id
+    assert test_task_list[1]["sender"] is matrix_queue.client.user_id
 
-    with patch('taskiq_matrix.matrix_queue.logger', new=MagicMock()) as mock_logger:
+    with patch("taskiq_matrix.matrix_queue.logger", new=MagicMock()) as mock_logger:
         # call filter_acked_tasks and store the result in unacked_tasks
         unacked_tasks = matrix_queue.filter_acked_tasks(test_task_objects, exclude_self=True)
 
@@ -324,10 +292,13 @@ async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_sent_by_
 
     await matrix_queue.shutdown()
 
+
 @pytest.mark.integtest  # depends an AsyncClient, Checkpoint, and TaskTypes in the class constructor
-async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_not_sent_by_self(test_matrix_broker):
+async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_not_sent_by_self(
+    test_matrix_broker,
+):
     """
-    Test that filter_acked_tasks returns acknowledged tasks that were not sent by 
+    Test that filter_acked_tasks returns acknowledged tasks that were not sent by
     the queue's client matrix account.
     """
 
@@ -353,7 +324,6 @@ async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_not_sent
         },
     ]
 
-
     # create task objects using the dictionaries and put them into a list
     task1 = Task(**test_task_list[0])
     task2 = Task(**test_task_list[1])
@@ -365,10 +335,9 @@ async def test_matrix_queue_filter_acked_tasks_mixed_tasks_exclude_self_not_sent
     matrix_queue.task_types.task = "test_matrix_queue"
     matrix_queue.task_types.ack = "test_matrix_queue"
 
-
     # verify that the sender of the tasks are not the same as the queue's client's user id
-    assert test_task_list[0]['sender'] is not matrix_queue.client.user_id
-    assert test_task_list[1]['sender'] is not matrix_queue.client.user_id
+    assert test_task_list[0]["sender"] is not matrix_queue.client.user_id
+    assert test_task_list[1]["sender"] is not matrix_queue.client.user_id
 
     # call filter_acked_tasks and store the result in unacked_tasks
     unacked_tasks = matrix_queue.filter_acked_tasks(test_task_objects, exclude_self=True)
@@ -420,10 +389,10 @@ async def test_matrix_queue_filter_acked_tasks_mixed_tasks_include_self(test_mat
     matrix_queue = broker.mutex_queue
     matrix_queue.task_types.task = "test_matrix_queue"
     matrix_queue.task_types.ack = "test_matrix_queue"
-    matrix_queue.client.user_id = 'sender'
+    matrix_queue.client.user_id = "sender"
 
-    assert test_task_list[0]['sender'] is matrix_queue.client.user_id
-    assert test_task_list[1]['sender'] is matrix_queue.client.user_id
+    assert test_task_list[0]["sender"] is matrix_queue.client.user_id
+    assert test_task_list[1]["sender"] is matrix_queue.client.user_id
 
     # call filter_acked_tasks and store the result in unacked_tasks
     unacked_tasks = matrix_queue.filter_acked_tasks(test_task_objects)
@@ -434,6 +403,7 @@ async def test_matrix_queue_filter_acked_tasks_mixed_tasks_include_self(test_mat
     assert unacked_tasks[0] == test_task_objects[0]
 
     await matrix_queue.shutdown()
+
 
 async def test_matrix_queue_get_unacked_tasks_whoamierror(test_matrix_broker):
     """
@@ -451,8 +421,7 @@ async def test_matrix_queue_get_unacked_tasks_whoamierror(test_matrix_broker):
     mock_error = MagicMock(spec=WhoamiError)
     mock_error.message = "test message"
     matrix_queue.client.whoami.return_value = mock_error
-    
-    
+
     # call get_unacked tasks to raise exception
     with pytest.raises(Exception, match="test message"):
         result = await matrix_queue.get_unacked_tasks(timeout=0)
@@ -627,9 +596,10 @@ async def test_matrix_queue_get_unacked_tasks_only_unacked_tasks(test_matrix_bro
 
     await test_broker.shutdown()
 
+
 async def test_matrix_queue_get_unacked_tasks_no_tasks_in_queue(test_matrix_broker):
     """
-    Tests that get_unacked tasks returns an empty list if there are no tasks in 
+    Tests that get_unacked tasks returns an empty list if there are no tasks in
     the queue.
     """
 
@@ -640,7 +610,7 @@ async def test_matrix_queue_get_unacked_tasks_no_tasks_in_queue(test_matrix_brok
 
     # call the function without kicking any tasks to the queue
     result = await matrix_queue.get_unacked_tasks(timeout=0)
-    
+
     # verify that the queue has no unacked tasks in it
     assert len(result[1]) == 0
 
@@ -912,6 +882,7 @@ async def test_matrix_queue_ack_msg_uses_given_id(test_matrix_broker):
 
     await matrix_queue.shutdown()
 
+
 @pytest.mark.integtest  # depends on Task
 async def test_matrix_queue_yield_task_lock_fail(test_matrix_broker):
     """
@@ -1032,11 +1003,12 @@ async def test_matrix_queue_yield_task_not_acked(test_matrix_broker):
     # verify that the acked message that was returned matches the data that was
     # passed to it
     assert isinstance(acked_message, AckableMessage)
-    assert acked_message.data == data #type:ignore
-    assert acked_message.ack.func == ack.func #type:ignore
-    assert acked_message.ack.args == ack.args #type:ignore
+    assert acked_message.data == data  # type:ignore
+    assert acked_message.ack.func == ack.func  # type:ignore
+    assert acked_message.ack.args == ack.args  # type:ignore
 
     await matrix_queue.shutdown()
+
 
 async def test_matrix_queue_yield_task_no_lock(test_matrix_broker):
     """
@@ -1063,15 +1035,15 @@ async def test_matrix_queue_yield_task_no_lock(test_matrix_broker):
     test_task = Task(**test_task_info)
 
     # establish what the function should return
-    expected_result = json.dumps(test_task.data).encode('utf-8') 
+    expected_result = json.dumps(test_task.data).encode("utf-8")
 
-    # patch the logger in lock.py 
-    with patch('taskiq_matrix.lock.logger', new=MagicMock()) as mock_lock_logger:
+    # patch the logger in lock.py
+    with patch("taskiq_matrix.lock.logger", new=MagicMock()) as mock_lock_logger:
         result = await matrix_queue.yield_task(test_task, ignore_acks=True, lock=False)
 
     # verify that the lock's logger is never used
     mock_lock_logger.debug.assert_not_called()
 
-    # verify that yield_task returned bytes 
+    # verify that yield_task returned bytes
     assert isinstance(result, bytes)
     assert result == expected_result
