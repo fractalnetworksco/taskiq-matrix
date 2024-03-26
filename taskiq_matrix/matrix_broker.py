@@ -41,7 +41,6 @@ class MatrixBroker(AsyncBroker):
     mutex_queue: MatrixQueue
     replication_queue: ReplicatedQueue
     result_backend: MatrixResultBackend
-    room_id: str
     homeserver_url: str
     access_token: str
     CHECKPOINT_ROOM_STATE_TYPE = "taskiq.checkpoints"
@@ -80,7 +79,7 @@ class MatrixBroker(AsyncBroker):
         self.access_token = access_token
         return self
 
-    async def _init_queues(self):
+    def _init_queues(self):
         try:
             if not all([self.homeserver_url, self.access_token]):
                 raise Exception("Matrix config must be set with with_matrix_config.")
@@ -120,7 +119,7 @@ class MatrixBroker(AsyncBroker):
         await super().startup()
 
         # create and initialize queues and their checkpoints
-        await self._init_queues()
+        self._init_queues()
         await self.device_queue.checkpoint.get_or_init_checkpoint()
         await self.broadcast_queue.checkpoint.get_or_init_checkpoint()
         await self.mutex_queue.checkpoint.get_or_init_checkpoint()
@@ -176,7 +175,7 @@ class MatrixBroker(AsyncBroker):
         if not room_id:
             raise Exception("room_id is required to be set in labels")
 
-        await self._init_queues()
+        self._init_queues()
 
         queue_name = message.labels.get("queue", "mutex")
         device_name = message.labels.get("device")

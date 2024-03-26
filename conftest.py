@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shutil
 from typing import Any, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -12,7 +13,7 @@ from fractal.matrix.async_client import FractalAsyncClient
 from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
 from taskiq_matrix.matrix_broker import MatrixBroker
-from taskiq_matrix.matrix_queue import Checkpoint, Task
+from taskiq_matrix.matrix_queue import FileSystemCheckpoint, Task
 from taskiq_matrix.matrix_result_backend import MatrixResultBackend
 
 try:
@@ -94,11 +95,19 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
         # set the broker's room id
         # broker.room_id = room_id
         broker.with_matrix_config(
-            new_room_id, os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
+            os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
         )
 
         # use room_id for the queues
-        await broker._init_queues()
+        broker._init_queues()
+
+        # ensure checkpoint paths are all cleared
+        try:
+            shutil.rmtree(broker.device_queue.checkpoint.CHECKPOINT_DIR)
+        except FileNotFoundError:
+            pass
+
+        broker._test_room_id = new_room_id
 
         return broker
 
@@ -181,13 +190,15 @@ def unknown_event_factory() -> Callable[[str, str], UnknownEvent]:
     Returns a mock Matrix event class.
     """
 
-    def create_test_event(body: str, sender: str, msgtype: str = "test.event") -> UnknownEvent:
+    def create_test_event(
+        body: str, sender: str, room_id: str, msgtype: str = "test.event"
+    ) -> UnknownEvent:
         return UnknownEvent(
             source={
                 "event_id": "test_event_id",
                 "sender": sender,
                 "origin_server_ts": 0,
-                "content": {"msgtype": msgtype, "body": body, "sender": sender},
+                "content": {"msgtype": msgtype, "body": body, "sender": sender, "room_id": room_id},
             },
             type=msgtype,
         )
@@ -201,7 +212,7 @@ def test_iterable_tasks(unknown_event_factory):
     get_tasks() interable
     """
 
-    def factory(num_tasks: int):
+    def factory(num_tasks: int, room_id: str):
         tasks = []
         for i in range(num_tasks):
             event = unknown_event_factory(
@@ -213,13 +224,18 @@ def test_iterable_tasks(unknown_event_factory):
                         {
                             "name": "task_fixture",
                             "cron": "* * * * *",
-                            "labels": {"task_id": "mutex_checkpoint", "queue": "mutex"},
+                            "labels": {
+                                "task_id": "mutex_checkpoint",
+                                "queue": "mutex",
+                                "room_id": room_id,
+                            },
                             "args": ["mutex"],
                             "kwargs": {},
                         }
                     ),
                 },
                 "test_sender",
+                room_id,
             )
 
             tasks.append(Task(**event.source["content"]))
