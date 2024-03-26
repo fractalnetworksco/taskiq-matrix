@@ -15,7 +15,7 @@ from .exceptions import (
     ExpireTimeMustBeMoreThanZeroError,
     ResultDecodeError,
 )
-from .filters import create_sync_filter, run_sync_filter
+from .filters import create_sync_filter, run_sync_filter, sync_room_timelines
 from .utils import send_message
 
 _ReturnType = TypeVar("_ReturnType")
@@ -91,7 +91,7 @@ class MatrixResultBackend(AsyncResultBackend):
         except KeyError:
             raise KeyError(f"room_id is not set in the labels of the result: {result}")
 
-        logger.debug("Setting result for task %s" % task_id)
+        logger.info("Setting result for task %s in room %s" % (task_id, room_id))
 
         message: Dict[str, Union[str, bytes, int]] = {
             "name": task_id,
@@ -124,12 +124,24 @@ class MatrixResultBackend(AsyncResultBackend):
         # FIXME: May need to use client.joined_rooms()
         # then iterate through them and use room_messages.
         sync_filter = create_sync_filter(types=[f"taskiq.result.{task_id}"])
-        result = await run_sync_filter(
+        timelines = await sync_room_timelines(
             self.matrix_client,
             sync_filter,
             timeout=0,
             since=None,
         )
+
+        result = {}
+
+        for room_id, timeline in timelines.items():
+            events = timeline.events
+            if not events:
+                continue
+
+            # return the first event found
+            result = {room_id: [events[0].source["content"]]}
+            return result
+
         return result
 
     async def is_result_ready(self, task_id: str) -> bool:
