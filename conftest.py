@@ -2,7 +2,8 @@ import asyncio
 import json
 import os
 import shutil
-from typing import Any, Awaitable, Callable, Generator
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -118,6 +119,45 @@ def test_matrix_broker(
     return create
 
 
+@pytest.fixture(scope="function")
+def test_matrix_broker_with_cleanup(new_matrix_room: Callable[[], Awaitable[str]]):
+    @asynccontextmanager
+    async def create():
+        """
+        Creates a MatrixBroker instance whose queues are configured to
+        use a new room each time the fixture is called.
+        """
+        new_room_id = await new_matrix_room()
+        # os.environ['MATRIX_ROOM_ID'] = room_id
+
+        broker = MatrixBroker()
+
+        # set the broker's room id
+        # broker.room_id = room_id
+        broker.with_matrix_config(
+            os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
+        )
+
+        # use room_id for the queues
+        broker._init_queues()
+
+        # ensure checkpoint paths are all cleared
+        try:
+            shutil.rmtree(broker.device_queue.checkpoint.CHECKPOINT_DIR)
+        except FileNotFoundError:
+            pass
+
+        broker._test_room_id = new_room_id
+
+        yield broker
+
+        print(f"Cleaning up")
+
+        await broker.mutex_queue.client.room_leave(new_room_id)
+
+    return create
+
+
 @pytest.fixture
 def test_broker_message():
     """
@@ -185,7 +225,6 @@ def test_checkpoint(matrix_client):
         pass
 
     return checkpoint
-
 
 
 @pytest.fixture

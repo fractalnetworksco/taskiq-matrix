@@ -1,13 +1,10 @@
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fractal.matrix import FractalAsyncClient
-from nio import RoomGetStateEventError, RoomGetStateEventResponse
-from taskiq import ScheduledTask
+from nio import SyncError
 from taskiq_matrix.schedulesource import MatrixRoomScheduleSource
 
-pytestmark = pytest.mark.skip(reason="Schedule source needs refactored to support multi-room sync")
 
 async def test_matrix_room_schedule_constructor_error():
     """
@@ -19,12 +16,12 @@ async def test_matrix_room_schedule_constructor_error():
     # valid broker to raise an exception
     with pytest.raises(TypeError):
         broker = "test broker not a real broker should raise error"
-        test_schedule = MatrixRoomScheduleSource(broker)
+        MatrixRoomScheduleSource(broker)
 
 
 async def test_matrix_room_schedule_startup(test_matrix_broker):
     """
-    Tests that the startup() function sets the schedule's 'initial' property
+    Tests that the startup() function sets the schedule's '_initial' property
     to True
     """
 
@@ -33,11 +30,11 @@ async def test_matrix_room_schedule_startup(test_matrix_broker):
     test_schedule = MatrixRoomScheduleSource(broker)
 
     # verify that the schedule source's initial attribute is set to False before startup
-    assert not hasattr(test_schedule, "initial")
+    assert not hasattr(test_schedule, "_initial")
 
     # call startup() and verify that initial is changed to True
     await test_schedule.startup()
-    assert test_schedule.initial is True
+    assert test_schedule._initial is True
 
 
 async def test_matrix_room_schedule_get_schedules_true_initial(test_matrix_broker):
@@ -45,17 +42,15 @@ async def test_matrix_room_schedule_get_schedules_true_initial(test_matrix_broke
     Test that get_schedules() returns an empty list if the schedule's 'initial' property
     is set to True
     """
-
-    # create a broker fixture and use it to create a MatrixRoomScheduleSource object
     broker = await test_matrix_broker()
     test_schedule = MatrixRoomScheduleSource(broker)
 
     # call startup() and verify that initial is set to True
     await test_schedule.startup()
-    assert test_schedule.initial == True
+    assert test_schedule._initial is True
 
     # mock the get_schedules_from_room function
-    test_schedule.get_schedules_from_room = MagicMock()
+    test_schedule.get_schedules_from_rooms = MagicMock()
 
     # call the get_schedules function and verify that it returned an
     # empty list
@@ -63,7 +58,7 @@ async def test_matrix_room_schedule_get_schedules_true_initial(test_matrix_broke
     assert schedules == []
 
     # verify that get_schedules_from_room was not called
-    test_schedule.get_schedules_from_room.assert_not_called()
+    test_schedule.get_schedules_from_rooms.assert_not_called()
 
 
 @pytest.mark.integtest
@@ -75,7 +70,7 @@ async def test_matrix_room_schedule_get_schedules_no_tasks(test_matrix_broker):
     # create a broker fixture and use it to create a MatrixRoomScheduleSource object
     broker = await test_matrix_broker()
     test_schedule = MatrixRoomScheduleSource(broker)
-    test_schedule.initial = False
+    test_schedule._initial = False
 
     # call get_schedules
     schedules = await test_schedule.get_schedules()
@@ -85,32 +80,50 @@ async def test_matrix_room_schedule_get_schedules_no_tasks(test_matrix_broker):
 
 
 @pytest.mark.integtest
-async def test_matrix_room_schedule_get_schedules_broker_task(test_matrix_broker):
+async def test_matrix_room_schedule_get_schedules_broker_task(test_matrix_broker_with_cleanup):
     """
     Tests that a task is returned if a task is registered with the broker
     """
+    async with test_matrix_broker_with_cleanup() as test_broker:
+        room_id = test_broker._test_room_id
+        test_schedule = MatrixRoomScheduleSource(test_broker)
+        test_schedule._initial = False
 
-    # create a broker fixture and use it to create a MatrixRoomScheduleSource object
-    test_broker = await test_matrix_broker()
-    test_schedule = MatrixRoomScheduleSource(test_broker)
-    test_schedule.initial = False
+        # verify that there are no scheduled tasks
+        result = await test_schedule.get_schedules()
+        assert result == []
 
-    # verify that there are no scheduled tasks
-    result = await test_schedule.get_schedules()
-    assert result == []
+        task_json = {
+            "name": "some_task",
+            "cron": "* * * * *",
+            "labels": {"task_id": "some_task", "queue": "mutex"},
+            "args": ["an_arg"],
+            "kwargs": {},
+        }
 
-    # kick a task up to the broker
-    task = test_broker.register_task(
-        lambda x: print("A", x),
-        task_name="taskiq.update_checkpoint",
-    )
+        # register task with broker
+        test_broker.register_task(
+            lambda x: print("A", x),
+            task_name="some_task",
+        )
+        test_broker._init_queues()
 
-    test_broker._init_queues()
-    await test_broker.add_mutex_checkpoint_task()
+        # put a schedule into a room for the scheduler to find
+        await test_broker.mutex_queue.client.room_put_state(
+            room_id, "taskiq.schedules", {"tasks": [task_json]}
+        )
 
-    # call get_schedules and verify that a ScheduledTask was returned
-    result = await test_schedule.get_schedules()
-    assert len(result) == 1
+        # call get_schedules and verify that a ScheduledTask was returned
+        result = await test_schedule.get_schedules()
+        assert len(result) == 1
+
+        assert result[0].task_name == task_json["name"]
+        assert "scheduled_task" in result[0].labels
+        assert result[0].labels["room_id"] == room_id
+
+        # FIXME: This should go in the test_matrix_broker filter
+        # leave the room so that the any other test does not pick up schedules from this room
+        await test_broker.mutex_queue.client.room_leave(room_id)
 
 
 async def test_matrix_room_schedule_get_schedules_non_existant_task(test_matrix_broker):
@@ -121,23 +134,23 @@ async def test_matrix_room_schedule_get_schedules_non_existant_task(test_matrix_
     # create a broker fixture and use it to create a MatrixRoomScheduleSource object
     broker = await test_matrix_broker()
     test_schedule = MatrixRoomScheduleSource(broker)
-    test_schedule.initial = False
+    test_schedule._initial = False
 
     #  patch get_schedules_from_room
     with patch.object(
-        test_schedule, "get_schedules_from_room", new_callable=AsyncMock
+        test_schedule, "get_schedules_from_rooms", new_callable=AsyncMock
     ) as mock_get_schedules_from_room:
-        mock_get_schedules_from_room.return_value = [{"name": "non_existent_task", "labels": {}}]
+        mock_get_schedules_from_room.return_value = {
+            "!abc:localhost": [{"name": "non_existant_task", "labels": {}}]
+        }
 
         # call get_schedules to raise an exception, verify that the error message matches
         # what is expected
-        with pytest.raises(
-            Exception, match="Got schedule for non-existant task: non_existent_task"
-        ):
-            await test_schedule.get_schedules()
+        result = await test_schedule.get_schedules()
+        assert len(result) == 0
 
-            # verify that the mocked function was called once
-            mock_get_schedules_from_room.assert_called_once()
+        # verify that the mocked function was called once
+        mock_get_schedules_from_room.assert_called_once()
 
 
 async def test_matrix_room_schedule_get_schedules_broker_check(test_matrix_broker):
@@ -146,216 +159,130 @@ async def test_matrix_room_schedule_get_schedules_broker_check(test_matrix_broke
     the loop is exited and the list of schedules is returned without appending
     any tasks.
     """
-
-    # create the broker from fixture
     broker = await test_matrix_broker()
 
-    # patch the logger in the schedulesource.py file
-    with patch("taskiq_matrix.schedulesource.logger", new=MagicMock()) as mock_logger:
-        # patch get_schedules_from_room
-        with patch(
-            "taskiq_matrix.schedulesource.MatrixRoomScheduleSource.get_schedules_from_room",
-            new_callable=AsyncMock,
-        ) as mock_get_schedules_from_room:
-            # create a task dictionary and set get_schedules_from_room to return it
-            task_name = "task_with_different_broker"
-            task_with_different_broker = {
-                "name": task_name,
-                "labels": {},
-            }
-            mock_get_schedules_from_room.return_value = [task_with_different_broker]
+    with patch(
+        "taskiq_matrix.schedulesource.MatrixRoomScheduleSource.get_schedules_from_rooms",
+        new_callable=AsyncMock,
+    ) as mock_get_schedules_from_room:
+        task_name = "task_with_different_broker"
+        task_with_different_broker = {
+            "name": task_name,
+            "labels": {},
+        }
+        mock_get_schedules_from_room.return_value = {
+            "!abc:localhost": [task_with_different_broker]
+        }
 
-            # patch get_all_tasks and set its return value to a dictionary with a
-            # MagicMock whose broker does not match the schedule source's broker
-            with patch.object(
-                broker, "get_all_tasks", return_value={task_name: MagicMock(broker=MagicMock())}
-            ):
-                test_schedule = MatrixRoomScheduleSource(broker)
-                test_schedule.initial = False
-                result = await test_schedule.get_schedules()
+        with patch.object(
+            broker,
+            "get_all_tasks",
+            return_value={task_name: MagicMock(broker=MagicMock())},
+        ):
+            test_schedule = MatrixRoomScheduleSource(broker)
+            test_schedule._initial = False
+            result = await test_schedule.get_schedules()
 
-        # verify that the logger.debug() function was called
-        mock_logger.debug.assert_called_once()
         # verify that get_schedules returned an empty list
         assert result == []
 
 
-async def test_matrix_room_schedule_get_schedules_no_cron_or_time(test_matrix_broker):
+async def test_matrix_room_schedule_get_schedules_no_cron_or_time(
+    test_matrix_broker_with_cleanup,
+):
     """
     Tests that an error is raised if the task does not have "cron" or "time" key-value
     pairs
     """
+    async with test_matrix_broker_with_cleanup() as test_broker:
+        room_id = test_broker._test_room_id
+        test_schedule = MatrixRoomScheduleSource(test_broker)
+        test_schedule._initial = False
 
-    # create the broker from fixture
-    broker = await test_matrix_broker()
+        # verify that there are no scheduled tasks
+        result = await test_schedule.get_schedules()
+        assert result == []
 
-    # patch the logger in the schedulesource.py file
-    with patch("taskiq_matrix.schedulesource.logger", new=MagicMock()) as mock_logger:
-        # patch get_schedules_from_room
-        with patch(
-            "taskiq_matrix.schedulesource.MatrixRoomScheduleSource.get_schedules_from_room",
-            new_callable=AsyncMock,
-        ) as mock_get_schedules_from_room:
-            # create a task dictionary with no "cron" or "time" and set
-            # get_schedules_from_room to return it
-            task_name = "task_with_missing_schedule_no_cron_time"
-            task_with_missing_schedule_no_cron_time = {
-                "name": task_name,
-                "labels": {},
-            }
-            mock_get_schedules_from_room.return_value = [task_with_missing_schedule_no_cron_time]
+        task_json = {
+            "name": "some_task",
+            "labels": {"task_id": "some_task", "queue": "mutex"},
+            "args": ["an_arg"],
+            "kwargs": {},
+        }
 
-            # patch get_all_tasks and set its return value to a dictionary with a
-            # MagicMock whose broker matches the schedule source's broker
-            with patch.object(
-                broker, "get_all_tasks", return_value={task_name: MagicMock(broker=broker)}
-            ):
-                test_schedule = MatrixRoomScheduleSource(broker)
-                test_schedule.initial = False
+        # register task with broker
+        test_broker.register_task(
+            lambda x: print("A", x),
+            task_name="some_task",
+        )
+        test_broker._init_queues()
 
-                # call get_schedules() to raise an exception
-                with pytest.raises(
-                    Exception, match=f"Schedule for task {task_name} has no cron or time"
-                ):
-                    await test_schedule.get_schedules()
+        # put a schedule into a room for the scheduler to find
+        await test_broker.mutex_queue.client.room_put_state(
+            room_id, "taskiq.schedules", {"tasks": [task_json]}
+        )
 
-        # verify that logger.debug() was not called
-        mock_logger.debug.assert_not_called()
+        result = await test_schedule.get_schedules()
+
+        # task shouldn't be returned since it lacks a cron or time key-value pair
+        assert len(result) == 0
 
 
-async def test_matrix_room_schedule_get_schedules_valid_task(test_matrix_broker):
-    """
-    Tests that a list containing a ScheduledTask object is returned if the task
-    in the schedulesource contains all of the necessary information
-    """
-
-    # create the broker from fixture
-    broker = await test_matrix_broker()
-
-    # patch the logger in the schedulesource.py file
-    with patch("taskiq_matrix.schedulesource.logger", new=MagicMock()) as mock_logger:
-        # patch get_schedules_from_room
-        with patch(
-            "taskiq_matrix.schedulesource.MatrixRoomScheduleSource.get_schedules_from_room",
-            new_callable=AsyncMock,
-        ) as mock_get_schedules_from_room:
-            # create a valid task dictionary with all necessary information and set
-            # get_schedules_from_room to return it
-            task_name = "valid_task"
-            valid_task = {
-                "name": task_name,
-                "labels": {},
-                "args": ["test arg"],
-                "kwargs": {"test": "kwarg"},
-                "cron": "test cron",
-                "time": datetime(2023, 12, 1, 14, 30, 0),
-            }
-            mock_get_schedules_from_room.return_value = [valid_task]
-
-            # patch get_all_tasks and set its return value to a dictionary with a
-            # MagicMock whose broker matches the schedule source's broker
-            with patch.object(
-                broker, "get_all_tasks", return_value={task_name: MagicMock(broker=broker)}
-            ):
-                test_schedule = MatrixRoomScheduleSource(broker)
-                test_schedule.initial = False
-
-                result = await test_schedule.get_schedules()
-
-            # verify that logger.debug() was called once
-            mock_logger.debug.assert_called_once()
-
-            # verify that the ScheduledTask object properties match what was created
-            # in the dictionary above
-            assert result[0].task_name == valid_task["name"]
-            assert result[0].labels == valid_task["labels"]
-            assert result[0].args == valid_task["args"]
-            assert result[0].kwargs == valid_task["kwargs"]
-            assert result[0].cron == valid_task["cron"]
-            assert result[0].time == valid_task["time"]
-
-
-async def test_matrix_room_schedule_get_schedules_from_room_unknown_error(test_matrix_broker):
+async def test_matrix_room_schedule_get_schedules_from_room_unknown_error(
+    test_matrix_broker_with_cleanup,
+):
     """
     Tests that an empty dictionary is returned when there is an unknown error in the
     room state. Verifies that status code is not "M_NOT_FOUND" by checking the logger.
     """
+    async with test_matrix_broker_with_cleanup() as broker:
+        test_schedule = MatrixRoomScheduleSource(broker)
 
-    # create a broker from fixture and use it to create a MatrixRoomScheduleSource object
-    broker = await test_matrix_broker()
-    test_schedule = MatrixRoomScheduleSource(broker)
+        test_schedule.client = MagicMock(spec=FractalAsyncClient)
 
-    # mock the broker's mutex_queue.client object
-    broker.mutex_queue.client = MagicMock(spec=FractalAsyncClient)
+        test_schedule.client.sync.return_value = SyncError(
+            message="test message", status_code="test status code"
+        )
 
-    # mock room_get_state_event to return a RoomGetStateEventError with an invalid
-    # status code
-    broker.mutex_queue.client.room_get_state_event.return_value = RoomGetStateEventError(
-        message="test message", status_code="test status code"
-    )
-
-    # patch the logger object and call the function
-    with patch("taskiq_matrix.schedulesource.logger", new=MagicMock()) as mock_log:
-        mock_log.warn = MagicMock()
-        resp = await test_schedule.get_schedules_from_room()
-        assert resp == []
-
-    # verify that logger.warn() was called
-    mock_log.warn.assert_called()
+        resp = await test_schedule.get_schedules_from_rooms()
+        assert resp == {}
 
 
-async def test_matrix_room_schedule_get_schedules_from_room_not_found(test_matrix_broker):
-    """
-    Tests that an empty dictionary is returned when the room is not found.
-    Verifies that status code is "M_NOT_FOUND" by checking the logger.
-    """
-
-    # create a broker from fixture and use it to create a MatrixRoomScheduleSource object
-    broker = await test_matrix_broker()
-    test_schedule = MatrixRoomScheduleSource(broker)
-
-    # mock the broker's mutex_queue.client object
-    broker.mutex_queue.client = MagicMock(spec=FractalAsyncClient)
-
-    # mock room_get_state_event to return a RoomGetStateEventError with a valid
-    # status code of "M_NOT_FOUND"
-    broker.mutex_queue.client.room_get_state_event.return_value = RoomGetStateEventError(
-        message="test message", status_code="M_NOT_FOUND"
-    )
-
-    # patch the logger object and call the function
-    with patch("taskiq_matrix.schedulesource.logger", new=MagicMock()) as mock_log:
-        mock_log.info = MagicMock()
-        resp = await test_schedule.get_schedules_from_room()
-        assert resp == []
-
-    # verify that logger.info() was called
-    mock_log.info.assert_called()
-
-
-async def test_matrix_room_schedule_get_schedules_from_room_content_returned(test_matrix_broker):
+async def test_matrix_room_schedule_get_schedules_from_room_content_returned(
+    test_matrix_broker_with_cleanup,
+):
     """
     Tests that if room_get_state_event returns a RoomGetStateEventResponse, the function
     returns a list of tasks present in the room
     """
 
-    # create a broker from fixture and use it to create a MatrixRoomScheduleSource object
-    broker = await test_matrix_broker()
-    test_schedule = MatrixRoomScheduleSource(broker)
+    async with test_matrix_broker_with_cleanup() as test_broker:
+        room_id = test_broker._test_room_id
+        test_schedule = MatrixRoomScheduleSource(test_broker)
+        test_schedule._initial = False
 
-    # mock the broker's mutex_queue.client object
-    broker.mutex_queue.client = MagicMock(spec=FractalAsyncClient)
+        task_json = {
+            "name": "some_task",
+            "cron": "* * * * *",
+            "labels": {"task_id": "some_task", "queue": "mutex"},
+            "args": ["an_arg"],
+            "kwargs": {},
+        }
 
-    # create a dictionary of tasks and put it in a RoomGetStateEventResponse object
-    content = {"tasks": ["test task"]}
-    broker.mutex_queue.client.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content=content, event_type="test type", state_key="test key", room_id="test id"
-    )
+        # register task with broker
+        test_broker.register_task(
+            lambda x: print("A", x),
+            task_name="some_task",
+        )
+        test_broker._init_queues()
 
-    # call get_schedules_from_room
-    resp = await test_schedule.get_schedules_from_room()
+        # put a schedule into a room for the scheduler to find
+        await test_broker.mutex_queue.client.room_put_state(
+            room_id, "taskiq.schedules", {"tasks": [task_json]}
+        )
+        # call get_schedules_from_room
+        resp = await test_schedule.get_schedules_from_rooms()
 
-    # verify that the function returned a list of size 1 containing the task from the
-    # dictionary created above
-    assert len(resp) == 1
-    assert resp[0] == "test task"
+        # should get back the task that was put into the room
+        assert len(resp) == 1
+        assert resp[room_id] == [task_json]

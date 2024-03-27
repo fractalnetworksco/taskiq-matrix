@@ -87,6 +87,41 @@ def create_filter(
     return message_filter
 
 
+def create_state_filter(
+    room_id: Optional[str] = None,
+    types: list = [],
+    not_types: list = [],
+    limit: Optional[int] = None,
+    not_senders: list = [],
+) -> Dict[str, Any]:
+    """
+    Create a filter for a room and/or specific message types.
+
+    Returns:
+        filter dict
+    """
+    message_filter = {
+        "presence": {"limit": 0, "types": []},
+        "account_data": {"limit": 0, "types": []},
+        "room": {
+            "state": {
+                "types": [*types],
+                "not_types": [*not_types],
+                "not_senders": [*not_senders],
+            },
+            "timeline": {"types": [], "limit": 0},
+        },
+        "request_id": str(uuid4()),
+    }
+    if room_id is not None:
+        message_filter["room"]["rooms"] = [room_id]
+
+    if limit is not None:
+        message_filter["room"]["state"]["limit"] = limit
+
+    return message_filter
+
+
 def create_sync_filter(
     room_id: Optional[str] = None,
     types: list = [],
@@ -98,7 +133,11 @@ def create_sync_filter(
     Creates a filter that works with the sync endpoint.
     """
     return create_filter(
-        room_id=room_id, types=types, not_types=not_types, limit=limit, not_senders=not_senders
+        room_id=room_id,
+        types=types,
+        not_types=not_types,
+        limit=limit,
+        not_senders=not_senders,
     )
 
 
@@ -135,6 +174,7 @@ async def run_sync_filter(
     timeout: int = 30000,
     since: Optional[str] = None,
     content_only: bool = True,
+    state: bool = False,
     **kwargs,
 ) -> Dict[str, Any]:
     """
@@ -151,10 +191,18 @@ async def run_sync_filter(
     rooms = list(res.rooms.join.keys())
     d = {}
     for room in rooms:
-        if content_only:
-            d[room] = [get_content_only(event) for event in res.rooms.join[room].timeline.events]
+        if not state:
+            if content_only:
+                d[room] = [
+                    get_content_only(event) for event in res.rooms.join[room].timeline.events
+                ]
+            else:
+                d[room] = [event for event in res.rooms.join[room].timeline.events]
         else:
-            d[room] = [event for event in res.rooms.join[room].timeline.events]
+            if content_only:
+                d[room] = [get_content_only(event) for event in res.rooms.join[room].state]
+            else:
+                d[room] = [event for event in res.rooms.join[room].state]
 
     return d
 
