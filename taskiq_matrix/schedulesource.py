@@ -1,9 +1,12 @@
 import logging
 from typing import Any, Dict, List
 
+from fractal.matrix.async_client import FractalAsyncClient
 from nio.responses import RoomGetStateEventError
 from taskiq import ScheduledTask
 from taskiq.abc.schedule_source import ScheduleSource
+
+from .filters import create_state_filter, create_sync_filter, run_sync_filter
 
 SCHEDULE_DIR = "/schedules"
 
@@ -83,13 +86,24 @@ class MatrixRoomScheduleSource(ScheduleSource):
         from .matrix_broker import MatrixBroker
 
         if not isinstance(broker, MatrixBroker):
-            raise TypeError(f"MatrixRoomScheduleSource expected MatrixBroker, got {type(broker)}")
+            raise TypeError(
+                f"MatrixRoomScheduleSource expected broker of type MatrixBroker, got {type(broker)}"
+            )
 
         self.broker = broker
+        if not hasattr(self.broker, "homeserver_url") or not hasattr(self.broker, "access_token"):
+            raise Exception("MatrixBroker must be configured using .with_matrix_config()")
+
+        self.client = FractalAsyncClient(self.broker.homeserver_url, self.broker.access_token)
 
     async def startup(self) -> None:
         await super().startup()
-        self.initial = True
+        self._initial = True
+        return None
+
+    async def shutdown(self) -> None:
+        await super().shutdown()
+        await self.client.close()
         return None
 
     async def get_schedules(self) -> List["ScheduledTask"]:
@@ -98,60 +112,75 @@ class MatrixRoomScheduleSource(ScheduleSource):
 
         :return: list of schedules.
         """
-        if self.initial is True:
+        if self._initial is True:
             # NOTE: this is a hack to prevent the scheduler from sending
             # schedules (importantly ones that occur on the minute) when the
             # scheduler starts up at a time in between the minute (1-59 seconds).
             # This basically eliminates duplicate schedules being fired since
             # the scheduler can acquire the task's schedule lock since it is
             # out of phase from other schedulers.
-            self.initial = False
+            self._initial = False
             return []
 
         schedules = []
-        schedule_state = await self.get_schedules_from_room()
+        schedule_state = await self.get_schedules_from_rooms()
         broker_tasks = self.broker.get_all_tasks()
-        for task in schedule_state:
-            if task["name"] not in broker_tasks.keys():
-                logger.error(f'Got schedule for non-existant task: {task["name"]}')
-                raise Exception("Got schedule for non-existant task: {}".format(task["name"]))
-            if broker_tasks[task["name"]].broker != self.broker:
-                continue
-            if "cron" not in task and "time" not in task:
-                raise Exception("Schedule for task {} has no cron or time".format(task["name"]))
-            labels = task.get("labels", {})
-            labels.update(broker_tasks[task["name"]].labels)
+        for room_id, tasks in schedule_state.items():
+            for task in tasks:
+                if task["name"] not in broker_tasks.keys():
+                    logger.warning("Got schedule for non-existant task: %s", task["name"])
+                    continue
+                if broker_tasks[task["name"]].broker != self.broker:
+                    continue
+                if "cron" not in task and "time" not in task:
+                    logger.warning("Schedule for task %s has no cron or time", task["name"])
+                    continue
+                labels = task.get("labels", {})
+                labels.update(broker_tasks[task["name"]].labels)
 
-            # ensure scheduled task label is set so that kick knows to lock
-            labels["scheduled_task"] = True
+                # ensure scheduled task label is set so that kick knows to lock
+                labels["scheduled_task"] = True
+                labels["room_id"] = room_id
 
-            schedules.append(
-                ScheduledTask(
-                    task_name=task["name"],
-                    labels=labels,
-                    args=task.get("args", []),
-                    kwargs=task.get("kwargs", {}),
-                    cron=task.get("cron"),
-                    time=task.get("time"),
-                ),
-            )
-        logger.debug(f"Returning schedules: {schedules}")
+                schedules.append(
+                    ScheduledTask(
+                        task_name=task["name"],
+                        labels=labels,
+                        args=task.get("args", []),
+                        kwargs=task.get("kwargs", {}),
+                        cron=task.get("cron"),
+                        time=task.get("time"),
+                    ),
+                )
+        logger.info("Returning schedules: %s" % schedules)
         return schedules
 
-    async def get_schedules_from_room(self) -> List[Dict[str, Any]]:
-        # FIXME: Should each queue have its own schedule state?
-        # for now all schedules for all queues are stored in the same state
-        resp = await self.broker.mutex_queue.client.room_get_state_event(
-            self.broker.room_id,
-            SCHEDULE_STATE_TYPE,
-        )
-        if isinstance(resp, RoomGetStateEventError):
-            if resp.status_code == "M_NOT_FOUND":
-                logger.info(f"No schedules found for room {self.broker.room_id}")
-            else:
-                logger.warn(
-                    f"Encountered error when fetching schedules from room {self.broker.room_id}: {resp}"
-                )
-            return []
-        else:
-            return resp.content.get("tasks", [])
+    async def get_schedules_from_rooms(self) -> dict[str, list[dict[str, Any]]]:
+        sync_filter = create_state_filter(types=[SCHEDULE_STATE_TYPE])
+        try:
+            resp = await run_sync_filter(self.client, sync_filter, state=True, since=None)
+        except Exception as e:
+            logger.error("Error fetching schedules from rooms: %s", e)
+            return {}
+
+        scheduled_tasks = {}
+
+        for room_id, state in resp.items():
+            if not state:
+                logger.info("No schedules found in room %s", room_id)
+                continue
+
+            try:
+                state_event = state[0]
+            except IndexError:
+                logger.error("No state event found in room %s", room_id)
+                continue
+
+            tasks = state_event.get("tasks", [])
+            if not tasks:
+                logger.info("No schedules found in room %s", room_id)
+                continue
+
+            scheduled_tasks[room_id] = tasks
+
+        return scheduled_tasks

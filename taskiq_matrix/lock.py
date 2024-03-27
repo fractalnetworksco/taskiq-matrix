@@ -1,11 +1,16 @@
+import asyncio
+import functools
 import json
 import logging
 import os
+import tempfile
 from base64 import b64encode
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 from uuid import uuid4
 
+from filelock import FileLock, UnixFileLock
 from fractal.matrix.async_client import FractalAsyncClient
 from nio import (
     MatrixRoom,
@@ -199,7 +204,7 @@ class MatrixLock:
             self.client,
             self.room_id,
             filter,
-            since=self.next_batch,
+            start=self.next_batch or "",
             content_only=True,
             direction=message_direction,
             limit=limit,
@@ -225,3 +230,30 @@ class MatrixLock:
         if not isinstance(res, RoomMessagesError):
             return res.start
         raise Exception(f"Failed to get sync token for room {self.room_id}")
+
+
+class AsyncFileLock:
+    lock_path = tempfile.gettempdir()
+
+    def __init__(self, lock_file: str):
+        self.type = lock_file
+        self.lock = UnixFileLock(
+            f"{self.lock_path}{os.path.sep}{self.type}", timeout=0, is_singleton=True
+        )
+        self.loop = asyncio.get_event_loop()
+        self.executor = ThreadPoolExecutor(max_workers=1)
+
+    @asynccontextmanager
+    async def acquire_lock(self):
+        acquire = functools.partial(self.lock.acquire, blocking=False)
+        try:
+            await self.loop.run_in_executor(self.executor, acquire)
+        except TimeoutError:
+            raise LockAcquireError(f"Could not acquire lock for {self.type}")
+
+        logger.debug("Acquired lock on %s" % self.lock.lock_file)
+        try:
+            yield self.lock
+        finally:
+            logger.debug("Releasing lock on %s" % self.type)
+            await self.loop.run_in_executor(self.executor, self.lock.release)

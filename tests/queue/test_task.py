@@ -1,11 +1,9 @@
 import json
 
 import pytest
-
 from taskiq_matrix.matrix_queue import AckableMessage, Task
 
 
-@pytest.mark.integtest  # depends on json.loads
 async def test_task_verify_constructor():
     """
     Test that the data passed to the Task constructor matches what is in the task
@@ -18,9 +16,11 @@ async def test_task_verify_constructor():
             "task_id": "1",
             "task": json.dumps({"data": "Test Task 1"}),
             "queue": "mutex",
+            "room_id": "xyz",
         },
         "msgtype": "matrix_queue.task_types.ack",
         "sender": "@user:example.com",
+        "room_id": "xyz",
     }
 
     # create a Task object
@@ -34,7 +34,6 @@ async def test_task_verify_constructor():
     assert test_task.queue == task_event["body"]["queue"]
 
 
-@pytest.mark.integtest  # depends on NotImplementedError
 async def test_task_yield_task_raise_error():
     """
     Test that calling yield_task() raises a NotImplementedError
@@ -46,9 +45,11 @@ async def test_task_yield_task_raise_error():
             "task_id": "1",
             "task": json.dumps({"data": "Test Task 1"}),
             "queue": "mutex",
+            "room_id": "xyz",
         },
         "msgtype": "matrix_queue.task_types.ack",
         "sender": "@user:example.com",
+        "room_id": "xyz",
     }
 
     # create a Task object

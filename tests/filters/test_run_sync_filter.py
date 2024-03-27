@@ -27,10 +27,10 @@ async def test_run_sync_filter_respects_timeout(
     """
     broker = await test_matrix_broker()
     mutex_client = broker.mutex_queue.client
-    room_id = broker.room_id
+    room_id = broker._test_room_id
 
     # get a latest since token
-    latest_since_token = await mutex_client.get_latest_sync_token()
+    latest_since_token = await mutex_client.get_latest_sync_token(room_id)
     broker.mutex_queue.checkpoint.since_token = latest_since_token
     mutex_client.next_batch = latest_since_token
 

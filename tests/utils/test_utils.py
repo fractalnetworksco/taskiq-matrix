@@ -64,7 +64,7 @@ async def test_utils_send_message_bytes(test_matrix_broker):
     # create a broker from a fixture
     broker = await test_matrix_broker()
     client = broker.mutex_queue.client
-    room_id = broker.room_id
+    room_id = broker._test_room_id
 
     # create a byte message and cosntruct what the content dictionary should look like
     message = b"test message"
@@ -94,7 +94,7 @@ async def test_utils_send_message_string_or_dict(test_matrix_broker):
     # create a broker from a fixture
     broker = await test_matrix_broker()
     client = broker.mutex_queue.client
-    room_id = broker.room_id
+    room_id = broker._test_room_id
 
     # create string and dictionary messages
     string_message = "test string message"
@@ -141,7 +141,7 @@ async def test_utils_send_message_with_kwargs(test_matrix_broker):
     # create a broker object from a fixture
     broker = await test_matrix_broker()
     client = broker.mutex_queue.client
-    room_id = broker.room_id
+    room_id = broker._test_room_id
 
     # create a message and a kwarg
     message = "test message"
@@ -172,7 +172,7 @@ async def test_utils_send_message_error_sending_message(test_matrix_broker):
     # create a broker object from a fixture
     broker = await test_matrix_broker()
     client = broker.mutex_queue.client
-    room_id = broker.room_id
+    room_id = broker._test_room_id
 
     # create a byte message
     message = b"test message"
