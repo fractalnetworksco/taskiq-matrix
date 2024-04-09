@@ -7,8 +7,13 @@ import socket
 from typing import Any, AsyncGenerator, List, Optional, Self, TypeVar, Union
 from uuid import uuid4
 
-from fractal.matrix.async_client import FractalAsyncClient
-from nio import RoomGetStateEventError, RoomPutStateError
+from fractal.matrix.async_client import FractalAsyncClient, MatrixClient
+from nio import (
+    RoomCreateError,
+    RoomGetStateEventError,
+    RoomGetStateEventResponse,
+    RoomPutStateError,
+)
 from taskiq import AckableMessage, AsyncBroker, AsyncResultBackend, BrokerMessage
 
 from .exceptions import (
@@ -16,6 +21,7 @@ from .exceptions import (
     LockAcquireError,
     ScheduledTaskRequiresTaskIdLabel,
 )
+from .filters import create_sync_filter
 from .lock import MatrixLock
 from .matrix_queue import BroadcastQueue, MatrixQueue, ReplicatedQueue, Task
 from .matrix_result_backend import MatrixResultBackend
@@ -35,9 +41,9 @@ class MatrixBroker(AsyncBroker):
     mutex_queue: MatrixQueue
     replication_queue: ReplicatedQueue
     result_backend: MatrixResultBackend
-    room_id: str
     homeserver_url: str
     access_token: str
+    CHECKPOINT_ROOM_STATE_TYPE = "taskiq.checkpoints"
 
     def __init__(
         self,
@@ -55,7 +61,7 @@ class MatrixBroker(AsyncBroker):
         by all devices in a room (group)
         - mutex_queue: a queue of tasks that should be run by any (only one)
         device in a group
-        - replication_queue: a queue of tasks that should be run by each device
+        - replication_queue: a queue of tasks that should be run once by each device
 
         NOTE: Rate limiting for the configured user should be disabled:
         `insert into ratelimit_override values ("@mjolnir:my-homeserver.chat", 0, 0);`
@@ -68,174 +74,52 @@ class MatrixBroker(AsyncBroker):
         self.device_name = os.environ.get("MATRIX_DEVICE_NAME", socket.gethostname())
         self.worker_id = uuid4().hex
 
-    def with_matrix_config(self, room_id: str, homeserver_url: str, access_token: str) -> Self:
-        self.room_id = room_id
+    def with_matrix_config(self, homeserver_url: str, access_token: str) -> Self:
         self.homeserver_url = homeserver_url
         self.access_token = access_token
         return self
 
     def _init_queues(self):
         try:
-            if not all([self.room_id, self.homeserver_url, self.access_token]):
+            if not all([self.homeserver_url, self.access_token]):
                 raise Exception("Matrix config must be set with with_matrix_config.")
-        except:
+        except Exception:
             raise Exception("Matrix config must be set with with_matrix_config.")
 
         if not hasattr(self, "mutex_queue"):
             self.mutex_queue = MatrixQueue(
-                "mutex",
-                homeserver_url=self.homeserver_url,
-                access_token=self.access_token,
-                room_id=self.room_id,
+                "mutex", homeserver_url=self.homeserver_url, access_token=self.access_token
             )
             self.device_queue = MatrixQueue(
                 f"device.{self.device_name}",
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
-                room_id=self.room_id,
             )
             self.broadcast_queue = BroadcastQueue(
                 "broadcast",
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
-                room_id=self.room_id,
             )
             self.replication_queue = ReplicatedQueue(
                 "replication",
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
-                room_id=self.room_id,
             )
 
     def with_result_backend(self, result_backend: AsyncResultBackend[_T]) -> Self:
         if not isinstance(result_backend, MatrixResultBackend):
             raise Exception("result_backend must be an instance of MatrixResultBackend")
-
         return super().with_result_backend(result_backend)
-
-    async def add_mutex_checkpoint_task(self) -> bool:
-        """
-        Adds the mutex checkpoint task to the room's taskiq.schedules
-        if it isn't already there.
-
-        Returns:
-            True if the checkpoint task was added (or already exists), else False.
-        """
-        task = {
-            "name": "taskiq.update_checkpoint",
-            "cron": "* * * * *",
-            "labels": {"task_id": "mutex_checkpoint", "queue": "mutex"},
-            "args": ["mutex"],
-            "kwargs": {},
-        }
-        schedules = await self.mutex_queue.client.room_get_state_event(
-            self.mutex_queue.room_id,
-            SCHEDULE_STATE_TYPE,
-        )
-
-        if isinstance(schedules, RoomGetStateEventError):
-            if schedules.status_code != "M_NOT_FOUND":
-                raise Exception(schedules.message)
-
-            logger.info(
-                "No schedules found for room %s, will attempt to add checkpoint task",
-                self.mutex_queue.room_id,
-            )
-            content = {"tasks": [task]}
-
-        # nio for some reason does not return a RoomGetStateEventError when
-        # the user is not in the room (M_FORBIDDEN). Instead, the content
-        # will be a dict with an "errcode" key.
-        elif "errcode" in schedules.content:
-            raise Exception(schedules.content["error"])
-
-        elif task not in schedules.content["tasks"]:
-            # there were already scheduled tasks in the room but the checkpoint
-            # task was not found in the list of tasks, so add it
-            logger.debug(
-                f"Checkpoint task not found in {self.mutex_queue.room_id} schedules, adding it",
-            )
-            schedules.content["tasks"].append(task)
-            content = schedules.content
-
-        else:
-            logger.debug(
-                f"Checkpoint task already exists in {self.mutex_queue.room_id} schedules"
-            )
-            return True
-
-        # update schedule state to include checkpoint task
-        try:
-            async with MatrixLock(room_id=self.mutex_queue.room_id).lock(SCHEDULE_STATE_TYPE):
-                logger.info(f"Adding checkpoint task to {self.mutex_queue.room_id} schedules")
-                res = await self.mutex_queue.client.room_put_state(
-                    self.mutex_queue.room_id,
-                    SCHEDULE_STATE_TYPE,
-                    content,
-                )
-                if isinstance(res, RoomPutStateError):
-                    logger.error(f"Failed to add checkpoint task: {res}")
-                    return False
-                else:
-                    return True
-        except LockAcquireError as e:
-            logger.error(f"{e}\n\n")
-            return False
-
-    async def update_checkpoints(self, interval: int = 60):
-        """
-        Background task that periodically updates the device, broadcast,
-        and replication queue checkpoints.
-
-        Args:
-            interval (int): The interval in seconds to update the checkpoints.
-                            Defaults to 60 seconds.
-        """
-        from .tasks import update_checkpoint
-
-        _caught_up = False
-        try:
-            while True:
-                # only update checkpoints if all queues are caught up
-                # FIXME: as queues are caught up, add them to the list of queues to update?
-                # right now, all queues must be up to date before the update_checkpoint task begins
-                if not _caught_up and all(
-                    [
-                        self.device_queue.caught_up,
-                        self.broadcast_queue.caught_up,
-                        self.replication_queue.caught_up,
-                    ]
-                ):
-                    _caught_up = True
-
-                try:
-                    if _caught_up:
-                        # run checkpoint updates in parallel
-                        await asyncio.gather(
-                            update_checkpoint("device"),
-                            update_checkpoint("broadcast"),
-                            update_checkpoint("replication"),
-                        )
-                except Exception as err:
-                    logger.error("Encountered error in update_device_checkpoint: %s", err.args)
-
-                await asyncio.sleep(interval)
-        except asyncio.CancelledError:
-            return None
 
     async def startup(self) -> None:
         """
-        Starts up the broker by connecting to the matrix server and
-        performing an initial sync.
-
-        Will exit if the initial sync fails or the provided room is not found.
+        Starts up the broker.
         """
         logger.info("Starting Taskiq Matrix Broker")
         await super().startup()
 
+        # create and initialize queues and their checkpoints
         self._init_queues()
-
-        # create and initialize queues
         await self.device_queue.checkpoint.get_or_init_checkpoint()
         await self.broadcast_queue.checkpoint.get_or_init_checkpoint()
         await self.mutex_queue.checkpoint.get_or_init_checkpoint()
@@ -244,22 +128,11 @@ class MatrixBroker(AsyncBroker):
         # this device
         await self.replication_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
 
-        # ensure that checkpoint schedule task is added to schedules
-        await self.add_mutex_checkpoint_task()
-
-        # launch background task that updates device checkpoints
-        self.checkpoint_updater = asyncio.create_task(self.update_checkpoints())
-
-        return None
-
     async def shutdown(self) -> None:
         """
         Shuts down the broker.
         """
         logger.info("Shutting down the broker")
-        if hasattr(self, "checkpoint_updater"):
-            self.checkpoint_updater.cancel()
-            await self.checkpoint_updater
 
         await self.device_queue.shutdown()
         await self.broadcast_queue.shutdown()
@@ -299,6 +172,8 @@ class MatrixBroker(AsyncBroker):
         """
 
         room_id = message.labels.get("room_id")
+        if not room_id:
+            raise Exception("room_id is required to be set in labels")
 
         self._init_queues()
 
@@ -307,10 +182,9 @@ class MatrixBroker(AsyncBroker):
         queue: MatrixQueue = (
             self.device_queue if device_name else getattr(self, f"{queue_name}_queue")
         )
-        if not room_id:
-            room_id = queue.room_id
 
         # populate next batch on the result backend client to avoid result delay
+        # FIXME: make sure this is right after refactor
         if (
             isinstance(self.result_backend, MatrixResultBackend)
             and not self.result_backend.matrix_client.next_batch
@@ -409,11 +283,10 @@ class MatrixBroker(AsyncBroker):
                             sync_task_results.append(pending_tasks)
                             logger.debug(f"Got {len(pending_tasks)} tasks from {queue}")
                     except Exception as e:
-                        logger.error(f"Sync failed: {e}")
+                        logger.exception(f"Sync failed: {e}")
 
                     # Reschedule a new task for the completed queue
                     if queue_name == "replication_queue":
-                        logger.info("Rescheduling replication_queue task")
                         tasks[queue_name] = asyncio.create_task(
                             getattr(self, queue_name).get_unacked_tasks(exclude_self=True),
                             name=queue_name,

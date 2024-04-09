@@ -4,8 +4,9 @@ from uuid import uuid4
 
 import pytest
 from fractal.matrix.async_client import FractalAsyncClient
-from nio import AsyncClient, RoomMessagesResponse, SyncError, SyncResponse
+from nio import AsyncClient, RoomMessagesResponse, SyncError, SyncResponse, UnknownEvent
 from taskiq_matrix.filters import (
+    MessageDirection,
     RoomMessagesError,
     create_filter,
     create_room_message_filter,
@@ -13,7 +14,6 @@ from taskiq_matrix.filters import (
     get_first_unacked_task,
     run_room_message_filter,
     run_sync_filter,
-    MessageDirection
 )
 from taskiq_matrix.matrix_queue import TaskTypes
 
@@ -45,7 +45,7 @@ async def test_filters_run_sync_filter_sync_error():
     await test_client.close()
 
 
-async def test_filters_run_sync_filter_false_content_only():
+async def test_filters_run_sync_filter_false_content_only(unknown_event_factory):
     """
     Test that setting content_only to False returns a dictionary of rooms
     with a list of events
@@ -53,11 +53,7 @@ async def test_filters_run_sync_filter_false_content_only():
 
     # create a mock FractalAsyncClient object and mock its sync function
     mock_client = MagicMock(spec=FractalAsyncClient)
-    mock_sync = AsyncMock()
-    mock_client.sync = mock_sync
-
-    # set content_only to false
-    false_content_only = False
+    mock_client.sync = AsyncMock()
 
     # create a dictionary of rooms
     mock_client.sync.return_value.rooms.join = {
@@ -65,28 +61,29 @@ async def test_filters_run_sync_filter_false_content_only():
         "room2": MagicMock(),
     }
 
+    room1_events = [
+        unknown_event_factory("event1", "sender1", "room1"),
+        unknown_event_factory("event2", "sender2", "room1"),
+    ]
+    room2_events = [unknown_event_factory("event3", "sender3", "room2")]
     # create a dictionary of mock event objects and assign them a room
-    mock_client.sync.return_value.rooms.join["room1"].timeline.events = [
-        AsyncMock(source={"content": "event1"}),
-        AsyncMock(source={"content": "event2"}),
-    ]
-    mock_client.sync.return_value.rooms.join["room2"].timeline.events = [
-        AsyncMock(source={"content": "event3"}),
-    ]
+    mock_client.sync.return_value.rooms.join["room1"].timeline.events = room1_events
+    mock_client.sync.return_value.rooms.join["room2"].timeline.events = room2_events
 
     # Call the run_sync_filter function
     result = await run_sync_filter(
         client=mock_client,
         filter={},
-        timeout=30000,
+        timeout=0,
         since=None,
-        content_only=false_content_only,
+        content_only=False,
     )
+    print("result", result)
 
     # assert the structure of the result
     assert result == {
-        "room1": [{"content": "event1"}, {"content": "event2"}],
-        "room2": [{"content": "event3"}],
+        "room1": room1_events,
+        "room2": room2_events,
     }
 
 
@@ -111,9 +108,9 @@ async def test_filters_run_sync_filter_true_content_only(unknown_event_factory):
         "room2": MagicMock(),
     }
 
-    event1 = unknown_event_factory("event1", "sender1")
-    event2 = unknown_event_factory("event2", "sender2")
-    event3 = unknown_event_factory("event3", "sender3")
+    event1 = unknown_event_factory("event1", "sender1", "room1")
+    event2 = unknown_event_factory("event2", "sender2", "room1")
+    event3 = unknown_event_factory("event3", "sender3", "room2")
 
     # create a dictionary of event objects and assign them a room
     mock_client.sync.return_value.rooms.join["room1"].timeline.events = [event1, event2]
@@ -354,11 +351,11 @@ async def test_filters_run_room_message_filter_content_only(
     broker = await test_matrix_broker()
     queue = broker.mutex_queue
     client = queue.client
-    room_id: str = client.room_id  # type:ignore
+    room_id: str = broker._test_room_id  # type:ignore
 
     # create a list of broker messages
     num_messages = 3
-    messages = await test_multiple_broker_message(num_messages)
+    messages = await test_multiple_broker_message(num_messages, room_id)
 
     # kick the tasks to the broker and save the IDs in a separate list
     task_ids = []
@@ -368,7 +365,7 @@ async def test_filters_run_room_message_filter_content_only(
 
     # create a room room message filter
     task_filter = create_room_message_filter(
-        broker.room_id,
+        room_id,
         types=[queue.task_types.task, f"{queue.task_types.ack}.*"],
     )
 
@@ -392,7 +389,7 @@ async def test_filters_run_room_message_filter_content_only(
 async def test_filters_run_room_message_filter_not_content_only(
     test_matrix_broker, test_multiple_broker_message
 ):
-    """ 
+    """
     Tests that if content_only is passed as False, a dictionary containing more information
     is returned and has the "content" dictionary nested in it.
     """
@@ -401,11 +398,11 @@ async def test_filters_run_room_message_filter_not_content_only(
     broker = await test_matrix_broker()
     queue = broker.mutex_queue
     client = queue.client
-    room_id: str = client.room_id  # type:ignore
+    room_id: str = broker._test_room_id  # type:ignore
 
     # create a list of broker messages
     num_messages = 3
-    messages = await test_multiple_broker_message(num_messages)
+    messages = await test_multiple_broker_message(num_messages, room_id)
 
     # kick the tasks to the broker and save the IDs in a separate list
     task_ids = []
@@ -415,7 +412,7 @@ async def test_filters_run_room_message_filter_not_content_only(
 
     # create a room room message filter
     task_filter = create_room_message_filter(
-        broker.room_id,
+        room_id,
         types=[queue.task_types.task, f"{queue.task_types.ack}.*"],
     )
 
@@ -423,11 +420,14 @@ async def test_filters_run_room_message_filter_not_content_only(
     result, _ = await run_room_message_filter(client, room_id, task_filter, content_only=False)
 
     for i in range(num_messages):
+        event = result[room_id][i]
+        assert isinstance(event, UnknownEvent)
         # verify that events returned match the IDs created locally
-        assert result[room_id][i]['content']['body']['task_id'] == task_ids[i]
-        assert "type" in result[room_id][i]
-        assert "room_id" in result[room_id][i]
-        assert "origin_server_ts" in result[room_id][i]
+        assert event.source["content"]["body"]["task_id"] == task_ids[i]
+        assert "type" in event.source
+        assert "room_id" in event.source
+        assert "origin_server_ts" in event.source
+
 
 async def test_filters_run_room_message_filter_sync_token_return_cases(test_matrix_broker):
     """
@@ -440,23 +440,25 @@ async def test_filters_run_room_message_filter_sync_token_return_cases(test_matr
     broker = await test_matrix_broker()
     queue = broker.mutex_queue
     client = queue.client
-    room_id: str = client.room_id  # type:ignore
+    room_id: str = broker._test_room_id  # type:ignore
 
     # create a room room message filter
     task_filter = create_room_message_filter(
-        broker.room_id,
+        room_id,
         types=[queue.task_types.task, f"{queue.task_types.ack}.*"],
     )
 
-    # Call the run_room_message_filter function 
-    _, front_sync_token = await run_room_message_filter(client, room_id, task_filter, direction=MessageDirection.front)
-    _, back_sync_token = await run_room_message_filter(client, room_id, task_filter, direction=MessageDirection.back)
+    # Call the run_room_message_filter function
+    _, front_sync_token = await run_room_message_filter(
+        client, room_id, task_filter, direction=MessageDirection.front
+    )
+    _, back_sync_token = await run_room_message_filter(
+        client, room_id, task_filter, direction=MessageDirection.back
+    )
 
     # verify that syncing from the front returns an empty sync token and that
-        # syncing from the back returns a sync token that is not None and is not
-        # the "s0" sync token signifying the start of the room's history
+    # syncing from the back returns a sync token that is not None and is not
+    # the "s0" sync token signifying the start of the room's history
     assert front_sync_token is None
     assert back_sync_token is not None
     assert back_sync_token is not "s0_0_0_0_0_0_0_0_0_0"
-
-

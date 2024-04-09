@@ -17,31 +17,30 @@ async def test_device_queue_works(
     in the task's device label.
     """
     broker = await test_matrix_broker()
+    room_id = broker._test_room_id
 
     # create two device queues
     laptop_queue = MatrixQueue(
         "device.laptop",
         homeserver_url=matrix_client.homeserver,
         access_token=matrix_client.access_token,
-        room_id=broker.room_id,
         device_name="laptop",
     )
     desktop_queue = MatrixQueue(
         "device.desktop",
         homeserver_url=matrix_client.homeserver,
         access_token=matrix_client.access_token,
-        room_id=broker.room_id,
         device_name="desktop",
     )
 
     # ensure the replication queue label is set
-    test_broker_message.labels = {"device": "laptop"}
+    test_broker_message.labels = {"device": "laptop", "room_id": room_id}
 
     # kick task to replication queue
     await broker.kick(test_broker_message)
 
-    _, laptop_tasks = await laptop_queue.get_unacked_tasks(timeout=0)
-    _, desktop_tasks = await desktop_queue.get_unacked_tasks(timeout=0)
+    laptop_tasks, _ = await laptop_queue.get_tasks_from_room(room_id)
+    desktop_tasks, _ = await desktop_queue.get_tasks_from_room(room_id)
 
     # only laptop queue should have the task
     assert len(laptop_tasks) == 1

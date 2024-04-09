@@ -1,7 +1,9 @@
 import asyncio
 import json
 import os
-from typing import Any, Awaitable, Callable, Generator
+import shutil
+from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Awaitable, Callable, Generator
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -12,7 +14,7 @@ from fractal.matrix.async_client import FractalAsyncClient
 from nio import RoomCreateError, RoomGetStateEventResponse, UnknownEvent
 from taskiq.message import BrokerMessage
 from taskiq_matrix.matrix_broker import MatrixBroker
-from taskiq_matrix.matrix_queue import Checkpoint, Task
+from taskiq_matrix.matrix_queue import FileSystemCheckpoint, Task
 from taskiq_matrix.matrix_result_backend import MatrixResultBackend
 
 try:
@@ -57,11 +59,13 @@ def test_matrix_result_backend(new_matrix_room) -> Callable[[], Awaitable[Matrix
 
     async def create() -> MatrixResultBackend:
         room_id = await new_matrix_room()
-        return MatrixResultBackend(
+
+        backend = MatrixResultBackend(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
-            room_id=room_id,
         )
+        backend._test_room_id = room_id
+        return backend
 
     return create
 
@@ -80,7 +84,9 @@ class MockAsyncIterable:
 
 
 @pytest.fixture(scope="function")
-def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
+def test_matrix_broker(
+    new_matrix_room: Callable[[], Awaitable[str]]
+) -> Callable[[], Awaitable[MatrixBroker]]:
     async def create():
         """
         Creates a MatrixBroker instance whose queues are configured to
@@ -94,13 +100,60 @@ def test_matrix_broker(new_matrix_room: Callable[[], Awaitable[str]]):
         # set the broker's room id
         # broker.room_id = room_id
         broker.with_matrix_config(
-            new_room_id, os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
+            os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
         )
 
         # use room_id for the queues
         broker._init_queues()
 
+        # ensure checkpoint paths are all cleared
+        try:
+            shutil.rmtree(broker.device_queue.checkpoint.CHECKPOINT_DIR)
+        except FileNotFoundError:
+            pass
+
+        broker._test_room_id = new_room_id
+
         return broker
+
+    return create
+
+
+@pytest.fixture(scope="function")
+def test_matrix_broker_with_cleanup(new_matrix_room: Callable[[], Awaitable[str]]):
+    @asynccontextmanager
+    async def create():
+        """
+        Creates a MatrixBroker instance whose queues are configured to
+        use a new room each time the fixture is called.
+        """
+        new_room_id = await new_matrix_room()
+        # os.environ['MATRIX_ROOM_ID'] = room_id
+
+        broker = MatrixBroker()
+
+        # set the broker's room id
+        # broker.room_id = room_id
+        broker.with_matrix_config(
+            os.environ["MATRIX_HOMESERVER_URL"], os.environ["MATRIX_ACCESS_TOKEN"]
+        )
+
+        # use room_id for the queues
+        broker._init_queues()
+
+        # ensure checkpoint paths are all cleared
+        try:
+            shutil.rmtree(broker.device_queue.checkpoint.CHECKPOINT_DIR)
+        except FileNotFoundError:
+            pass
+
+        broker._test_room_id = new_room_id
+
+        yield broker
+
+        print(f"Cleaning up")
+
+        await broker.mutex_queue.client.room_leave(new_room_id)
 
     return create
 
@@ -132,7 +185,7 @@ def test_multiple_broker_message():
     Create a BrokerMessage Fixture
     """
 
-    async def create(num_messages: int):
+    async def create(num_messages: int, room_id: str):
         messages = []
         for i in range(num_messages):
             task_id = str(uuid4())
@@ -149,7 +202,10 @@ def test_multiple_broker_message():
 
             messages.append(
                 BrokerMessage(
-                    task_id=task_id, task_name="test_name", message=message_bytes, labels={}
+                    task_id=task_id,
+                    task_name="test_name",
+                    message=message_bytes,
+                    labels={"room_id": room_id},
                 )
             )
 
@@ -159,15 +215,16 @@ def test_multiple_broker_message():
     return create
 
 
-@pytest.fixture(scope="function")
-def test_checkpoint(test_room_id):
-    mock_client_parameter = MagicMock(spec=FractalAsyncClient)
-    mock_client_parameter.homeserver = TEST_HOMESERVER_URL
-    mock_client_parameter.access_token = TEST_USER_ACCESS_TOKEN
-    mock_client_parameter.room_get_state_event.return_value = RoomGetStateEventResponse(
-        content={"checkpoint": "abc"}, event_type="abc", state_key="", room_id=test_room_id
-    )
-    return Checkpoint(type="abc", room_id=test_room_id, client=mock_client_parameter)
+@pytest.fixture
+def test_checkpoint(matrix_client):
+    checkpoint = FileSystemCheckpoint(type="abc", client=matrix_client)
+    # ensure checkpoint paths are all cleared
+    try:
+        shutil.rmtree(checkpoint.CHECKPOINT_DIR)
+    except FileNotFoundError:
+        pass
+
+    return checkpoint
 
 
 @pytest.fixture
@@ -181,13 +238,20 @@ def unknown_event_factory() -> Callable[[str, str], UnknownEvent]:
     Returns a mock Matrix event class.
     """
 
-    def create_test_event(body: str, sender: str, msgtype: str = "test.event") -> UnknownEvent:
+    def create_test_event(
+        body: str, sender: str, room_id: str, msgtype: str = "test.event"
+    ) -> UnknownEvent:
         return UnknownEvent(
             source={
                 "event_id": "test_event_id",
                 "sender": sender,
                 "origin_server_ts": 0,
-                "content": {"msgtype": msgtype, "body": body, "sender": sender},
+                "content": {
+                    "msgtype": msgtype,
+                    "body": body,
+                    "sender": sender,
+                    "room_id": room_id,
+                },
             },
             type=msgtype,
         )
@@ -201,7 +265,7 @@ def test_iterable_tasks(unknown_event_factory):
     get_tasks() interable
     """
 
-    def factory(num_tasks: int):
+    def factory(num_tasks: int, room_id: str):
         tasks = []
         for i in range(num_tasks):
             event = unknown_event_factory(
@@ -213,13 +277,18 @@ def test_iterable_tasks(unknown_event_factory):
                         {
                             "name": "task_fixture",
                             "cron": "* * * * *",
-                            "labels": {"task_id": "mutex_checkpoint", "queue": "mutex"},
+                            "labels": {
+                                "task_id": "mutex_checkpoint",
+                                "queue": "mutex",
+                                "room_id": room_id,
+                            },
                             "args": ["mutex"],
                             "kwargs": {},
                         }
                     ),
                 },
                 "test_sender",
+                room_id,
             )
 
             tasks.append(Task(**event.source["content"]))

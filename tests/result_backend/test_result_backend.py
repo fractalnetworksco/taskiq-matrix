@@ -6,9 +6,8 @@ from uuid import uuid4
 
 import pytest
 from fractal.matrix.exceptions import GetLatestSyncTokenError
-from nio import RoomMessagesError
+from nio import RoomMessagesError, Timeline, UnknownEvent
 from taskiq.result import TaskiqResult
-
 from taskiq_matrix.exceptions import DuplicateExpireTimeSelectedError
 from taskiq_matrix.matrix_result_backend import (
     ExpireTimeMustBeMoreThanZeroError,
@@ -30,7 +29,6 @@ async def test_matrix_result_backend_constructor_expire_time_error():
         test_backend = MatrixResultBackend(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
-            room_id=os.environ["MATRIX_ROOM_ID"],
             result_ex_time=None,
             result_px_time=-1,
         )
@@ -43,7 +41,6 @@ async def test_matrix_result_backend_constructor_expire_time_error():
         test_backend = MatrixResultBackend(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
-            room_id=os.environ["MATRIX_ROOM_ID"],
             result_ex_time=-1,
             result_px_time=None,
         )
@@ -56,7 +53,6 @@ async def test_matrix_result_backend_constructor_expire_time_error():
         test_backend = MatrixResultBackend(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
-            room_id=os.environ["MATRIX_ROOM_ID"],
             result_ex_time=-1,
             result_px_time=-1,
         )
@@ -75,7 +71,6 @@ async def test_matrix_result_backend_constructor_duplicate_expire_time_error():
         test_backend = MatrixResultBackend(
             homeserver_url=os.environ["MATRIX_HOMESERVER_URL"],
             access_token=os.environ["MATRIX_ACCESS_TOKEN"],
-            room_id=os.environ["MATRIX_ROOM_ID"],
             result_ex_time=1,
             result_px_time=1,
         )
@@ -105,15 +100,19 @@ async def test_matrix_result_backend_set_result_ex_time_case(test_matrix_result_
     """
 
     test_backend = await test_matrix_result_backend()
+    room_id = test_backend._test_room_id
+
     # set result_ex_time to 1 for test purposes
     test_backend.result_ex_time = 1
 
     # create a TaskiqResult object
     test_task_id = str(uuid4())
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
 
-    # verify that the TaskiqResult labels attribute is an empty dictionary
-    assert result.labels == {}
+    # device label shouldn't be set yet
+    assert "device" not in result.labels
 
     # call set result, patching the send_message function
     with patch(
@@ -133,11 +132,13 @@ async def test_matrix_result_backend_set_result_ex_time_case(test_matrix_result_
     # result's labels were updated
     mock_send_message.assert_called_with(
         test_backend.matrix_client,
-        test_backend.room,
+        room_id,
         comparison_message,
         msgtype=f"taskiq.result.{test_task_id}",
     )
-    assert result.labels == {"device": test_backend.device_name}
+
+    # device label should be set
+    assert result.labels == {"device": test_backend.device_name, "room_id": room_id}
     await test_backend.shutdown()
 
 
@@ -147,15 +148,19 @@ async def test_matrix_result_backend_set_result_px_time_case(test_matrix_result_
     pair if the MatrixBackendResult object has an existing px time
     """
     test_backend = await test_matrix_result_backend()
+    room_id = test_backend._test_room_id
+
     # set result_px_time to 1 for test purposes
     test_backend.result_px_time = 1
 
     # create a TaskiqResult object
     test_task_id = str(uuid4())
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
 
-    # verify that the TaskiqResult labels attribute is an empty dictionary
-    assert result.labels == {}
+    # device label shouldn't be set yet
+    assert "device" not in result.labels
 
     # call set result, patching the send_message function
     with patch(
@@ -175,11 +180,12 @@ async def test_matrix_result_backend_set_result_px_time_case(test_matrix_result_
     # result's labels were updated
     mock_send_message.assert_called_with(
         test_backend.matrix_client,
-        test_backend.room,
+        room_id,
         comparison_message,
         msgtype=f"taskiq.result.{test_task_id}",
     )
-    assert result.labels == {"device": test_backend.device_name}
+    # device label should be set
+    assert result.labels == {"device": test_backend.device_name, "room_id": room_id}
     await test_backend.shutdown()
 
 
@@ -189,13 +195,16 @@ async def test_matrix_result_backend_set_result_no_time_case(test_matrix_result_
     key-value pairs if the MatrixBackendResult object doesn't have either of them set.
     """
     test_backend = await test_matrix_result_backend()
+    room_id = test_backend._test_room_id
 
     # create a TaskiqResult object
     test_task_id = str(uuid4())
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
 
-    # verify that the TaskiqResult labels attribute is an empty dictionary
-    assert result.labels == {}
+    # device label shouldn't be set yet
+    assert "device" not in result.labels
 
     # call set result, patching the send_message function
     with patch(
@@ -214,16 +223,17 @@ async def test_matrix_result_backend_set_result_no_time_case(test_matrix_result_
     # result's labels were updated
     mock_send_message.assert_called_with(
         test_backend.matrix_client,
-        test_backend.room,
+        room_id,
         comparison_message,
         msgtype=f"taskiq.result.{test_task_id}",
     )
-    assert result.labels == {"device": test_backend.device_name}
+    # device label should be set
+    assert result.labels == {"device": test_backend.device_name, "room_id": room_id}
     await test_backend.shutdown()
 
 
 async def test_matrix_result_backend_is_result_ready_uses_cached_result(
-    test_matrix_result_backend,
+    test_matrix_result_backend, unknown_event_factory
 ):
     """
     Ensures that the is_result_ready function caches results and does not make
@@ -231,6 +241,7 @@ async def test_matrix_result_backend_is_result_ready_uses_cached_result(
     """
     # create a MatrixResultBackend object
     test_backend = await test_matrix_result_backend()
+    room_id = test_backend._test_room_id
 
     # create a task id
     test_task_id = str(uuid4())
@@ -239,13 +250,24 @@ async def test_matrix_result_backend_is_result_ready_uses_cached_result(
     test_backend.next_batch = None
     test_backend.matrix_client.next_batch = None
 
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
     serialized_result = b64encode(pickle.dumps(result)).decode()
-    response = {test_backend.room: [{"body": {"task": {"value": serialized_result}}}]}
+    timeline = Timeline(
+        events=[
+            unknown_event_factory(
+                {"task": {"value": serialized_result}}, "@user:localhost", "some.type"
+            )
+        ],
+        limited=False,
+        prev_batch="xyz",
+    )
+    response = {room_id: timeline}
 
     with patch(
-        "taskiq_matrix.matrix_result_backend.run_room_message_filter",
-        new=AsyncMock(return_value=(response, None)),
+        "taskiq_matrix.matrix_result_backend.sync_room_timelines",
+        new=AsyncMock(return_value=response),
     ) as mock_run_room_message_filter:
         # first call should invoke a call to run_room_message_filter
         await test_backend.is_result_ready(test_task_id)
@@ -276,10 +298,13 @@ async def test_matrix_result_backend_is_result_ready_result_is_ready(test_matrix
 
     # create a MatrixBackendResult object from a fixture
     test_backend = await test_matrix_result_backend()
+    room_id = test_backend._test_room_id
 
     # create a TaskiqResult object and set it
     test_task_id = str(uuid4())
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
     await test_backend.set_result(test_task_id, result)
 
     # call is_result_ready and verify that it returned true
@@ -297,10 +322,13 @@ async def test_matrix_result_backend_is_result_ready_result_not_ready_no_result(
 
     # create a MatrixBackendResult object from a fixture
     test_backend = await test_matrix_result_backend()
+    room_id = test_backend._test_room_id
 
     # create a TaskiqResult object but don't set it
     test_task_id = str(uuid4())
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
 
     # call is_result_ready and verify that it returned false
     result = await test_backend.is_result_ready(test_task_id)
@@ -318,10 +346,13 @@ async def test_matrix_result_backend_is_result_ready_result_not_ready_wrong_task
 
     # create a MatrixBackendResult object from a fixture
     test_backend = await test_matrix_result_backend()
+    room_id = test_backend._test_room_id
 
     # create a TaskiqResult object and set it
     test_task_id = str(uuid4())
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
     await test_backend.set_result(test_task_id, result)
 
     # call is_result_ready with a different task_id and verify that it returned false
@@ -342,9 +373,12 @@ async def test_matrix_result_backend_get_result_decode_error_loading_result_from
 
     # create a MatrixResultBackend object
     result_backend = await test_matrix_result_backend()
+    room_id = result_backend._test_room_id
 
     # set a result for the backend object
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
     await result_backend.set_result(task_id=task_id, result=result)
 
     # patch the b64decode function call to raise an exception
@@ -377,7 +411,7 @@ async def test_matrix_result_backend_get_result_error_fetching_result_from_matri
 
     # patch run_sync_filter to return None, raising an exception when its indeces are inaccessable
     with patch(
-        "taskiq_matrix.matrix_result_backend.run_room_message_filter",
+        "taskiq_matrix.matrix_result_backend.run_sync_filter",
         new=AsyncMock(return_value=({}, None)),
     ):
         # patch the file's logger to make sure the correct exception is raised
@@ -406,9 +440,12 @@ async def test_matrix_result_backend_get_result_decode_error_loading_as_taskiq_r
 
     # create a MatrixResultBackend object
     result_backend = await test_matrix_result_backend()
+    room_id = result_backend._test_room_id
 
     # set a result for the backend object
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
     await result_backend.set_result(task_id=task_id, result=result)
 
     # patch pickle.loads to raise an exception
@@ -437,9 +474,12 @@ async def test_matrix_result_backend_get_result_not_with_logs(test_matrix_result
 
     # create a MatrixResultBackend object
     result_backend = await test_matrix_result_backend()
+    room_id = result_backend._test_room_id
 
     # set a result for the backend object
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
     result.log = "test log"
     await result_backend.set_result(task_id=task_id, result=result)
 
@@ -463,9 +503,12 @@ async def test_matrix_result_backend_get_result_with_logs(test_matrix_result_bac
 
     # create a MatrixResultBackend object
     result_backend = await test_matrix_result_backend()
+    room_id = result_backend._test_room_id
 
     # set a result for the backend object
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
     result.log = "test log"
     await result_backend.set_result(task_id=task_id, result=result)
 
@@ -481,7 +524,7 @@ async def test_matrix_result_backend_get_result_with_logs(test_matrix_result_bac
 
 
 async def test_matrix_result_backend_get_result_uses_cached_result(
-    test_matrix_result_backend,
+    test_matrix_result_backend, unknown_event_factory
 ):
     """
     Tests that is_result_ready returns False if there is a result that is set but it is
@@ -490,18 +533,30 @@ async def test_matrix_result_backend_get_result_uses_cached_result(
 
     # create a MatrixBackendResult object from a fixture
     test_backend = await test_matrix_result_backend()
+    room_id = test_backend._test_room_id
 
     # create a TaskiqResult object and set it
     test_task_id = str(uuid4())
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
     await test_backend.set_result(test_task_id, result)
 
     serialized_result = b64encode(pickle.dumps(result)).decode()
-    response = {test_backend.room: [{"body": {"task": {"value": serialized_result}}}]}
+    timeline = Timeline(
+        events=[
+            unknown_event_factory(
+                {"task": {"value": serialized_result}}, "@user:localhost", "some.type"
+            )
+        ],
+        limited=False,
+        prev_batch="xyz",
+    )
+    response = {room_id: timeline}
 
     with patch(
-        "taskiq_matrix.matrix_result_backend.run_room_message_filter",
-        new=AsyncMock(return_value=(response, None)),
+        "taskiq_matrix.matrix_result_backend.sync_room_timelines",
+        new=AsyncMock(return_value=response),
     ) as mock_run_room_message_filter:
         result = await test_backend.get_result(test_task_id)
         assert result
@@ -522,9 +577,12 @@ async def test_matrix_result_backend_get_result_result_available(test_matrix_res
 
     # create a MatrixResultBackend object
     result_backend = await test_matrix_result_backend()
+    room_id = result_backend._test_room_id
 
     # set a result for the backend object
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
+    result = TaskiqResult(
+        is_err=False, return_value="chicken", execution_time=1.0, labels={"room_id": room_id}
+    )
     await result_backend.set_result(task_id=task_id, result=result)
 
     # call get_result and verify that it matches the object that was set
@@ -559,34 +617,3 @@ async def test_matrix_result_backend_get_result_no_result_set(test_matrix_result
     # verify that the logger argument was the correct one
     assert "Error getting task result from Matrix" in logged_string
     await result_backend.shutdown()
-
-
-async def test_matrix_result_backend_fetch_result_from_matrix_returns_result(
-    test_matrix_result_backend,
-):
-    """
-    Verifies that if the result is not received in the first call
-    to run_room_message_filter, the function will continue to call
-    run_room_message_filter until the result is received.
-    """
-    # create a MatrixResultBackend object
-    test_backend = await test_matrix_result_backend()
-
-    # create a task id
-    test_task_id = str(uuid4())
-
-    result = TaskiqResult(is_err=False, return_value="chicken", execution_time=1.0)
-    serialized_result = b64encode(pickle.dumps(result)).decode()
-    response = {test_backend.room: [{"body": {"task": {"value": serialized_result}}}]}
-
-    with patch(
-        "taskiq_matrix.matrix_result_backend.run_room_message_filter",
-        new=AsyncMock(return_value=(response, "new_next_batch")),
-    ) as mock_run_room_message_filter:
-        # first call should invoke a call to run_room_message_filter
-        result = await test_backend._fetch_result_from_matrix(test_task_id)
-        assert result == response
-
-        mock_run_room_message_filter.assert_called_once()
-
-    await test_backend.shutdown()
