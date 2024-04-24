@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -27,7 +26,6 @@ from .filters import (
     create_sync_filter,
     get_content_only,
     run_room_message_filter,
-    run_sync_filter,
     sync_room_timelines,
 )
 from .lock import AsyncFileLock, MatrixLock
@@ -63,7 +61,7 @@ class TaskTypes:
 class Task:
     acknowledged: bool
     type: str
-    data: str
+    data: dict[Any, Any]
     queue: str
     sender: str
     room_id: str
@@ -627,20 +625,3 @@ class BroadcastQueue(MatrixQueue):
         super().__init__(*args, **kwargs)
         self.task_types.ack = f"{self.task_types.ack}.{self.device_name}"
         self.task_types.lock = f"{self.task_types.lock}.{self.device_name}"
-
-
-class ReplicatedQueue(BroadcastQueue):
-    """
-    Replicated queues are broadcast queues whose checkpoints are device specific.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        homeserver_url: str,
-        access_token: str,
-        *args,
-        **kwargs,
-    ):
-        super().__init__(name, homeserver_url, access_token, *args, **kwargs)
-        self.checkpoint.type = f"{self.checkpoint.type}.{self.device_name}"

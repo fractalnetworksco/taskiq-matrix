@@ -23,7 +23,7 @@ from .exceptions import (
 )
 from .filters import create_sync_filter
 from .lock import MatrixLock
-from .matrix_queue import BroadcastQueue, MatrixQueue, ReplicatedQueue, Task
+from .matrix_queue import BroadcastQueue, MatrixQueue, Task
 from .matrix_result_backend import MatrixResultBackend
 from .schedulesource import SCHEDULE_STATE_TYPE
 from .utils import send_message
@@ -39,7 +39,6 @@ class MatrixBroker(AsyncBroker):
     device_queue: MatrixQueue
     broadcast_queue: BroadcastQueue
     mutex_queue: MatrixQueue
-    replication_queue: ReplicatedQueue
     result_backend: MatrixResultBackend
     homeserver_url: str
     access_token: str
@@ -61,7 +60,6 @@ class MatrixBroker(AsyncBroker):
         by all devices in a room (group)
         - mutex_queue: a queue of tasks that should be run by any (only one)
         device in a group
-        - replication_queue: a queue of tasks that should be run once by each device
 
         NOTE: Rate limiting for the configured user should be disabled:
         `insert into ratelimit_override values ("@mjolnir:my-homeserver.chat", 0, 0);`
@@ -100,11 +98,6 @@ class MatrixBroker(AsyncBroker):
                 homeserver_url=self.homeserver_url,
                 access_token=self.access_token,
             )
-            self.replication_queue = ReplicatedQueue(
-                "replication",
-                homeserver_url=self.homeserver_url,
-                access_token=self.access_token,
-            )
 
     def with_result_backend(self, result_backend: AsyncResultBackend[_T]) -> Self:
         if not isinstance(result_backend, MatrixResultBackend):
@@ -123,10 +116,6 @@ class MatrixBroker(AsyncBroker):
         await self.device_queue.checkpoint.get_or_init_checkpoint()
         await self.broadcast_queue.checkpoint.get_or_init_checkpoint()
         await self.mutex_queue.checkpoint.get_or_init_checkpoint()
-        # full sync is required for replication queue because it needs to
-        # sync any tasks that were sent before the checkpoint was created for
-        # this device
-        await self.replication_queue.checkpoint.get_or_init_checkpoint(full_sync=True)
 
     async def shutdown(self) -> None:
         """
@@ -137,7 +126,6 @@ class MatrixBroker(AsyncBroker):
         await self.device_queue.shutdown()
         await self.broadcast_queue.shutdown()
         await self.mutex_queue.shutdown()
-        await self.replication_queue.shutdown()
         return await super().shutdown()
 
     def _use_task_id(self, task_id: str, message: BrokerMessage) -> BrokerMessage:
@@ -265,10 +253,6 @@ class MatrixBroker(AsyncBroker):
                 "mutex_queue": asyncio.create_task(
                     self.mutex_queue.get_unacked_tasks(), name="mutex_queue"
                 ),
-                "replication_queue": asyncio.create_task(
-                    self.replication_queue.get_unacked_tasks(exclude_self=True),
-                    name="replication_queue",
-                ),
             }
             sync_task_results: List[List[Task]] = []
 
@@ -285,16 +269,9 @@ class MatrixBroker(AsyncBroker):
                     except Exception as e:
                         logger.exception(f"Sync failed: {e}")
 
-                    # Reschedule a new task for the completed queue
-                    if queue_name == "replication_queue":
-                        tasks[queue_name] = asyncio.create_task(
-                            getattr(self, queue_name).get_unacked_tasks(exclude_self=True),
-                            name=queue_name,
-                        )
-                    else:
-                        tasks[queue_name] = asyncio.create_task(
-                            getattr(self, queue_name).get_unacked_tasks(), name=queue_name
-                        )
+                    tasks[queue_name] = asyncio.create_task(
+                        getattr(self, queue_name).get_unacked_tasks(), name=queue_name
+                    )
 
                 if sync_task_results:
                     yield list(itertools.chain.from_iterable(sync_task_results))
