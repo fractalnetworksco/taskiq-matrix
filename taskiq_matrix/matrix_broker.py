@@ -7,13 +7,7 @@ import socket
 from typing import Any, AsyncGenerator, List, Optional, Self, TypeVar, Union
 from uuid import uuid4
 
-from fractal.matrix.async_client import FractalAsyncClient, MatrixClient
-from nio import (
-    RoomCreateError,
-    RoomGetStateEventError,
-    RoomGetStateEventResponse,
-    RoomPutStateError,
-)
+from fractal.matrix.async_client import FractalAsyncClient
 from taskiq import AckableMessage, AsyncBroker, AsyncResultBackend, BrokerMessage
 
 from .exceptions import (
@@ -21,11 +15,9 @@ from .exceptions import (
     LockAcquireError,
     ScheduledTaskRequiresTaskIdLabel,
 )
-from .filters import create_sync_filter
 from .lock import MatrixLock
 from .matrix_queue import BroadcastQueue, MatrixQueue, Task
 from .matrix_result_backend import MatrixResultBackend
-from .schedulesource import SCHEDULE_STATE_TYPE
 from .utils import send_message
 
 logging.getLogger("nio").setLevel(logging.WARNING)
