@@ -436,7 +436,7 @@ class MatrixQueue:
         Returns:
             A list of unacked tasks.
         """
-        task_dict: Dict[str, Task] = {}
+        task_dict: dict[str, Task] = {}
         for task in tasks:
             if task.type == self.task_types.task:
                 task.acknowledged = False
@@ -458,7 +458,14 @@ class MatrixQueue:
                 elif task.sender != self.client.user_id:
                     unacked.append(task)
                 else:
-                    logger.warning(f"Filtering out task {task.id} sent by {task.sender}")
+                    labels = task.data.get("labels", {})
+                    # add task to unacked list if task has ignore_exclude_self label set to True
+                    if labels and labels.get("ignore_exclude_self", False):
+                        unacked.append(task)
+                    else:
+                        logger.warning(
+                            f"Filtering out task {task.data['task_name']} sent by {task.sender}"
+                        )
 
         logger.debug(f"{self.name} Unacked tasks: {unacked}")
         return unacked
