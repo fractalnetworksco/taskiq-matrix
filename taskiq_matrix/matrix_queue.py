@@ -450,6 +450,9 @@ class MatrixQueue:
         unacked = []
         for task in task_dict.values():
             if not task.acknowledged:
+                labels = task.data.get("labels", {})
+                labels["sender"] = task.sender
+
                 # if exclude_self is False, then append unacked task
                 if not exclude_self:
                     unacked.append(task)
@@ -458,9 +461,6 @@ class MatrixQueue:
                 elif task.sender != self.client.user_id:
                     unacked.append(task)
                 else:
-                    labels = task.data.get("labels", {})
-                    labels["sender"] = task.sender
-
                     # add task to unacked list if task has ignore_exclude_self label set to True
                     if labels and labels.get("ignore_exclude_self", False):
                         unacked.append(task)
