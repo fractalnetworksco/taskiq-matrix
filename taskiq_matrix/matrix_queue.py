@@ -155,10 +155,10 @@ class FileSystemCheckpoint:
             async with AsyncFileLock(self.checkpoint_lock_type).acquire_lock():
                 async with aopen(self.checkpoint_path, "w") as f:
                     await f.write(since_token)
-                logger.info(f"Successfully set checkpoint for type: {self.type}")
+                logger.debug(f"Successfully set checkpoint for type: {self.type}")
             return True
         except LockAcquireError as e:
-            logger.warning(f"Failed to set checkpoint: {e}\n")
+            logger.debug(f"Failed to set checkpoint: {e}\n")
             return False
 
     async def update_checkpoint(self, new_checkpoint: str) -> str:
